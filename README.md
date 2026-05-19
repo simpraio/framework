@@ -157,6 +157,10 @@ The committed `mago.toml` defines the project scan scope and rule thresholds.
 - Apply SQL schemas only for enabled DB-backed features.
 - Do not expose `tools`, `.git`, or local config files through the web server.
 
+## No Packagist / No Composer
+
+Simpra is cloned into your project, not installed as a Composer dependency. There is no Packagist package and no `composer.json`. This is intentional — the framework has no external dependencies and does not use autoloading conventions that require Composer.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
