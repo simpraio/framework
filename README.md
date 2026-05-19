@@ -1,5 +1,9 @@
 # Simpra Framework
 
+![CI](https://github.com/simpraio/framework/actions/workflows/ci.yml/badge.svg)
+![PHP](https://img.shields.io/badge/php-8.4%2B-777BB4?logo=php)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
 Simpra is a small PHP 8.4+ framework for small websites, internal tools, and simple SaaS projects.
 
 It favors manual bootstrap, convention routing, static facades as the public API, and optional extensions over reflection, autowiring, service providers, or attribute-based routing. The goal is a framework you can read, reason about, and deploy without a large dependency stack.
