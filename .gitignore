@@ -1,0 +1,22 @@
+# Local configuration — contains secrets, never commit
+config/framework.local.php
+framework.local.php
+
+# Generated bundle files — rebuilt on first request
+cache/*.php
+
+# Runtime logs
+logs/*
+
+# IDE and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# AI
+CLAUDE.md
+.clade/*

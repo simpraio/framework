@@ -1,0 +1,95 @@
+:root {
+    --font-mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    --background: 0 0% 98%;
+    --foreground: 0 0% 10%;
+    --muted: 0 0% 42%;
+    --primary: 150 70% 28%;
+    --surface: 0 0% 100%;
+    --border: 0 0% 88%;
+    --shadow: 0 18px 60px hsla(0, 0%, 0%, .12);
+    --radius: .5rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: 240 6% 6%;
+        --foreground: 0 0% 92%;
+        --muted: 0 0% 62%;
+        --primary: 150 70% 55%;
+        --surface: 240 6% 10%;
+        --border: 240 4% 18%;
+        --shadow: 0 18px 60px hsla(0, 0%, 0%, .45);
+    }
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    min-height: 100%;
+    font-size: 100%;
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    background: radial-gradient(circle at 50% 30%, hsla(var(--primary) / .18), transparent 22rem),
+    linear-gradient(hsla(var(--foreground) / .055) 1px, transparent 1px),
+    linear-gradient(90deg, hsla(var(--foreground) / .055) 1px, transparent 1px),
+    hsl(var(--background));
+    background-size: auto, 4rem 4rem, 4rem 4rem, auto;
+    color: hsl(var(--foreground));
+    font: 1rem/1.6 system-ui, -apple-system, Roboto, sans-serif;
+}
+
+h1,
+p {
+    margin: 0;
+}
+
+.hello-page {
+    display: grid;
+    min-height: 100vh;
+    place-items: center;
+    padding: 1.25rem;
+}
+
+.hello-card {
+    width: min(100%, 28rem);
+    padding: clamp(2rem, 1.4rem + 4vw, 3rem);
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsla(var(--surface) / .9);
+    box-shadow: var(--shadow);
+    text-align: center;
+    backdrop-filter: blur(10px);
+}
+
+.hello-logo {
+    display: inline-flex;
+    margin-bottom: 1rem;
+    color: hsl(var(--primary));
+    font-family: var(--font-mono), monospace;
+    font-size: .95rem;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.hello-logo:hover {
+    color: hsl(var(--foreground));
+}
+
+.hello-card h1 {
+    font-size: clamp(2.5rem, 1.8rem + 4vw, 4rem);
+    line-height: 1.05;
+    letter-spacing: 0;
+}
+
+.hello-card p {
+    margin-top: .85rem;
+    color: hsl(var(--muted));
+    font-size: 1.05rem;
+}

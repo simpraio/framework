@@ -1,0 +1,21 @@
+[source]
+paths = ["framework"]
+excludes = [
+    "framework/cache",
+    "framework/logs",
+]
+
+[linter.rules.excessive-parameter-list]
+constructor-threshold = 10
+
+[linter.rules.too-many-methods]
+threshold = 20
+
+[linter.rules.cyclomatic-complexity]
+threshold = 25
+
+[linter.rules.no-boolean-flag-parameter]
+enabled = false
+
+[linter.rules.no-ini-set]
+enabled = false
