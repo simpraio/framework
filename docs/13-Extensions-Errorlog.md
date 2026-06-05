@@ -2,12 +2,12 @@
 
 ## Configuration
 
-Create `config/errorlog.php` in your project. The example below enables DB-backed error logging and shows the supported keys.
+Create `config/error-log.php` in your project. The example below enables DB-backed error logging and shows the supported keys.
 
 ```php
 return [
     'extensions' => [
-        'errorlog' => [
+        'error-log' => [
             'enabled'        => true,
             'retention_days' => 30,          // auto-delete entries older than N days
             'store_trace'    => true,          // persist full stack traces
@@ -17,7 +17,7 @@ return [
 ];
 ```
 
-The `error_log` database table is required for DB-backed error logging. Schema is in `tools/schema/errorlog.sql`.
+The `error_log` database table is required for DB-backed error logging. Schema is in `tools/schema/error-log.sql`.
 
 ## Public API
 
@@ -30,7 +30,7 @@ The Boot class implements `Bootable` and `Hook`. On boot, it registers a global 
 
 ## Schema
 
-Run `tools/schema/errorlog.sql` against your database before enabling the extension.
+Run `tools/schema/error-log.sql` against your database before enabling the extension.
 
 ```
 CREATE TABLE `error_log` (
@@ -55,7 +55,7 @@ CREATE TABLE `error_log` (
 Log a caught exception manually - useful for errors you handle gracefully but still want a record of:
 
 ```
-use extensions\errorlog\Logger;
+use extensions\error_log\Logger;
 
 try {
     ExternalApi::call();
@@ -68,8 +68,8 @@ try {
 With URL redaction - the `token` parameter value is never stored in the database:
 
 ```
-use extensions\errorlog\Config;
-use extensions\errorlog\Logger;
+use extensions\error_log\Config;
+use extensions\error_log\Logger;
 
 $config = Config::fromArray([
     'store_trace' => false,

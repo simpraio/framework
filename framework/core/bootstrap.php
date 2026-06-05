@@ -6,9 +6,11 @@ $core = __DIR__;
 
 require_once $core . '/config/Cast.php';
 require_once $core . '/config/Map.php';
+require_once $core . '/config/Egress.php';
 require_once $core . '/config/loader/Env.php';
 require_once $core . '/config/loader/Files.php';
 require_once $core . '/config/Compiler.php';
+require_once $core . '/config/RedactsSecrets.php';
 require_once $core . '/config/dto/Project.php';
 require_once $core . '/config/dto/Route.php';
 require_once $core . '/config/dto/Language.php';
@@ -45,6 +47,7 @@ require_once $core . '/tools/Identifier.php';
 require_once $core . '/tools/Format.php';
 require_once $core . '/tools/Assets.php';
 
+require_once $core . '/Result.php';
 require_once $core . '/Paths.php';
 require_once $core . '/Instance.php';
 require_once $core . '/Container.php';

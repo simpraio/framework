@@ -64,10 +64,10 @@ config/csrf.php         unsafe-method token validation
 config/seo.php          title, description, canonical tokens
 config/translation.php  route and language text
 config/registry.php     DB-backed key/value settings
-config/errorlog.php     DB-backed error capture
+config/error-log.php    DB-backed error capture
 config/events.php       in-process event dispatcher
 config/flash.php        one-shot session messages across redirects
-config/httpclient.php   outbound HTTP with retries and TLS
+config/http-client.php  outbound HTTP with retries and TLS
 config/mail.php         SMTP mailer - from address and transport
 config/ratelimit.php    per-IP request throttling
 config/profiler.php     request timing (development only)

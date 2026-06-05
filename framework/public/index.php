@@ -25,7 +25,27 @@ if (!class_exists('core\\Bundle', false)) {
 }
 
 spl_autoload_register(static function (string $class): void {
-    $file = dirname(__DIR__) . '/' . strtr(string: $class, from: '\\', to: '/') . '.php';
+    $segments = explode('\\', $class);
+
+    // Reject non-class namespace segments before converting them to file paths.
+    if (array_any(
+        $segments,
+        fn($segment) => preg_match('/^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/', $segment) !== 1
+    )) {
+        return;
+    }
+
+    // Map namespace segments to lowercased, hyphenated directory names
+    // (extensions\http_client -> extensions/http-client) while preserving the class
+    // file name. Inverse of core\extension\Loader's folder->namespace rule, which
+    // turns hyphenated extension folders into underscored namespace segments.
+    $className = array_pop($segments);
+    $dir = implode('/', array_map(
+        static fn(string $segment): string => strtolower(str_replace(search: '_', replace: '-', subject: $segment)),
+        $segments
+    ));
+
+    $file = dirname(__DIR__) . '/' . ($dir === '' ? '' : $dir . '/') . $className . '.php';
     if (is_file($file)) {
         require $file;
     }

@@ -2,10 +2,53 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient\curl;
+namespace extensions\http_client\curl;
 
 final class Headers
 {
+    /** @return array<string, scalar>|null */
+    public static function normalize(mixed $headers): ?array
+    {
+        if (!is_array($headers)) {
+            return null;
+        }
+
+        $valid = [];
+        foreach (array_keys($headers) as $key) {
+            if (!is_string($key) || !is_scalar($headers[$key])) {
+                continue;
+            }
+
+            $valid[$key] = $headers[$key];
+        }
+
+        return $valid === [] ? null : $valid;
+    }
+
+    /**
+     * @param array<int|string, scalar>|null $headers
+     * @return array<int|string, scalar>|null
+     */
+    public static function withoutSensitive(?array $headers): ?array
+    {
+        if ($headers === null) {
+            return null;
+        }
+
+        $filtered = [];
+        foreach ($headers as $key => $value) {
+            if (
+                is_string($key)
+                && in_array(strtolower($key), ['authorization', 'proxy-authorization', 'cookie'], strict: true)
+            ) {
+                continue;
+            }
+            $filtered[$key] = $value;
+        }
+
+        return $filtered === [] ? null : $filtered;
+    }
+
     /**
      * @param array<string, scalar>|null $headers
      * @return list<string>

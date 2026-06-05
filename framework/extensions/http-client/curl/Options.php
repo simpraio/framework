@@ -2,10 +2,10 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient\curl;
+namespace extensions\http_client\curl;
 
-use extensions\httpclient\Config;
-use extensions\httpclient\HttpClientException;
+use extensions\http_client\Config;
+use extensions\http_client\HttpClientException;
 
 final class Options
 {
@@ -35,10 +35,8 @@ final class Options
                 $body .= $chunk;
                 return strlen($chunk);
             },
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_PROTOCOLS_STR => Policy::allowedProtocols($config),
-            CURLOPT_REDIR_PROTOCOLS_STR => Policy::allowedProtocols($config),
             CURLOPT_CONNECTTIMEOUT => Policy::connectTimeout($config, $options),
             CURLOPT_TIMEOUT => Policy::timeout($config, $options),
             CURLOPT_HEADER => false,
@@ -46,15 +44,25 @@ final class Options
             CURLOPT_URL => $url,
             CURLOPT_HTTPGET => $options->method === 'GET',
             CURLOPT_POST => $options->method === 'POST',
-            CURLOPT_PROXY => $options->proxy,
             CURLOPT_HTTPHEADER => Headers::request($options->headers),
             CURLOPT_HEADERFUNCTION => Headers::response($responseHeaders),
         ];
 
         return $base
+            + self::proxyOptions($config)
             + self::cookieOptions($config, $options, $url)
             + Body::options($options)
             + Method::options($options->method);
+    }
+
+    /**
+     * Proxy is config-only so request options cannot bypass the egress allowlist.
+     *
+     * @return array<int, mixed>
+     */
+    private static function proxyOptions(Config $config): array
+    {
+        return $config->proxy === null ? [] : [CURLOPT_PROXY => $config->proxy];
     }
 
     private static function userAgent(): string
@@ -73,7 +81,7 @@ final class Options
 
         if ($config->cookieJarDir === null) {
             throw new HttpClientException(
-                'Cookie jar usage requires extensions.httpclient.cookie_jar_dir to be configured',
+                'Cookie jar usage requires extensions.http-client.cookie_jar_dir to be configured',
                 $url,
             );
         }

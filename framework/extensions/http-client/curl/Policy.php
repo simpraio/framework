@@ -2,9 +2,9 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient\curl;
+namespace extensions\http_client\curl;
 
-use extensions\httpclient\Config;
+use extensions\http_client\Config;
 
 final class Policy
 {

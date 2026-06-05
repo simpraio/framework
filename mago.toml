@@ -6,7 +6,7 @@ excludes = [
 ]
 
 [linter.rules.excessive-parameter-list]
-constructor-threshold = 10
+constructor-threshold = 11
 
 [linter.rules.too-many-methods]
 threshold = 20

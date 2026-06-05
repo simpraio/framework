@@ -24,9 +24,9 @@ final readonly class Config
     {
         return new self(
             enabled:   Cast::bool($raw['enabled'] ?? null, 'extensions.mail.enabled', true),
-            transport: strtolower(trim(Cast::string($raw['transport'] ?? null, 'extensions.mail.transport', 'smtp'))),
-            fromEmail: trim(Cast::string($raw['from_email'] ?? null, 'extensions.mail.from_email')),
-            fromName:  trim(Cast::string($raw['from_name'] ?? null, 'extensions.mail.from_name')),
+            transport: strtolower(Cast::trimmedString($raw['transport'] ?? null, 'extensions.mail.transport', 'smtp')),
+            fromEmail: Cast::trimmedString($raw['from_email'] ?? null, 'extensions.mail.from_email'),
+            fromName:  Cast::trimmedString($raw['from_name'] ?? null, 'extensions.mail.from_name'),
         );
     }
 

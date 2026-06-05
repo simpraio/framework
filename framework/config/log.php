@@ -18,5 +18,11 @@ return [
         // traces are the caller's responsibility - use `#[\SensitiveParameter]`
         // on parameters holding secrets.
         'redact_keys' => [],
+
+        // Whether config DTOs that hold secrets (DB password, SMTP password)
+        // mask those fields when dumped via var_dump/json_encode (see the
+        // RedactsSecrets trait). Defaults true; set false only for local
+        // debugging. Independent of redact_keys, which scrubs context arrays.
+        'redact_secrets' => true,
     ],
 ];

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient\curl;
+namespace extensions\http_client\curl;
 
 final class RequestOptions
 {
@@ -12,7 +12,6 @@ final class RequestOptions
     public ?array $headers;
     public ?string $cookies;
     public bool $raw;
-    public ?string $proxy;
     public ?int $timeout;
     public ?int $connectTimeout;
 
@@ -21,14 +20,26 @@ final class RequestOptions
     {
         $this->data = $options['data'] ?? null;
         $this->method = Method::normalize($options['method'] ?? (Body::hasData($this->data) ? 'POST' : 'GET'));
-        /** @var array<string, scalar>|null $headers */
-        $headers = is_array($options['headers'] ?? null) ? $options['headers'] : null;
-        $this->headers = $headers;
+        $this->headers = Headers::normalize($options['headers'] ?? null);
         $this->cookies = self::optionalString($options['cookies'] ?? null);
         $this->raw = ($options['raw'] ?? false) === true;
-        $this->proxy = self::optionalString($options['proxy'] ?? null);
         $this->timeout = self::optionalInt($options['timeout'] ?? null);
         $this->connectTimeout = self::optionalInt($options['connect_timeout'] ?? null);
+    }
+
+    public function forRedirect(int $status, bool $sameOrigin = true): self
+    {
+        $dropBody = $status === 303 || ($this->method === 'POST' && ($status === 301 || $status === 302));
+
+        return new self([
+            'method' => $dropBody ? 'GET' : $this->method,
+            'data' => $dropBody ? null : $this->data,
+            'headers' => $sameOrigin ? $this->headers : Headers::withoutSensitive($this->headers),
+            'cookies' => $sameOrigin ? $this->cookies : null,
+            'raw' => $dropBody ? false : $this->raw,
+            'timeout' => $this->timeout,
+            'connect_timeout' => $this->connectTimeout,
+        ]);
     }
 
     private static function optionalString(mixed $value): ?string

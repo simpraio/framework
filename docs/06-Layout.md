@@ -83,7 +83,7 @@ You can add any other tokens your project needs in `modules/Layout.php`.
 ```
 {LANGUAGE}         // current language code, e.g. 'en'
 {CSS_VERSION}      // mtime-based cache-busting version for common.css
-{JS_VERSION}       // mtime-based cache-busting version for common.js
+{JS_VERSION}       // mtime-based cache-busting version for your app JavaScript asset
 {GENERATION_TIME}  // render time in milliseconds
 {MAIN}             // rendered page body (raw - do not escape)
 ```

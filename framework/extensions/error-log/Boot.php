@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\errorlog;
+namespace extensions\error_log;
 
 use core\config\Config as CoreConfig;
 use core\extension\Bootable;
@@ -36,7 +36,7 @@ final class Boot extends ExtensionBoot implements Bootable, Hook
         }
 
         Cache::once(
-            'errorlog.purge',
+            'error-log.purge',
             static fn() => Logger::purge($config->retentionDays),
             86_400
         );

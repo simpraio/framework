@@ -15,6 +15,7 @@ final readonly class Project
         public string $url,
         public array $allowedHosts,
         public bool $debug,
+        public int $maxJsonDepth,
     ) {
     }
 
@@ -29,6 +30,7 @@ final readonly class Project
             url: Cast::string($raw['url'] ?? null, 'project.url', ''),
             allowedHosts: array_map(static fn(mixed $h): string => strtolower(Cast::string($h, 'project.allowed_hosts[]')), $hosts),
             debug: Cast::bool($raw['debug'] ?? null, 'project.debug'),
+            maxJsonDepth: max(1, Cast::int($raw['max_json_depth'] ?? null, 'project.max_json_depth', 64)),
         );
     }
 }

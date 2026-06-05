@@ -49,6 +49,24 @@ Db::delete('sessions', ['user_id' => $id]);
 
 `update()` and `delete()` throw `RuntimeException` when `$where` is empty - an unbounded `UPDATE` or `DELETE` must be written as a raw `execute()` call to make the intent explicit.
 
+### Condition values
+
+The `$where` array maps a column to a value, joined with `AND`. The value type controls the operator:
+
+- scalar -> `` `col` = ? ``
+- `null` -> `` `col` IS NULL `` (a `null` does **not** become `= NULL`, which never matches anything)
+- array -> `` `col` IN (?, ...) ``; an empty array matches nothing (`1 = 0`)
+
+```php
+Db::count('users', ['status' => 'active']);             // status = 'active'
+Db::delete('sessions', ['user_id' => null]);            // user_id IS NULL
+Db::values('users', 'id', 'name', ['id' => [1, 2, 3]]); // id IN (1, 2, 3)
+```
+
+### Affected vs matched rows
+
+`update()` returns the number of rows **matched** by `$where`, not only those whose values changed (the MySQL connection sets `MYSQL_ATTR_FOUND_ROWS`). An `UPDATE` that matches a row but writes identical values returns `1`, not `0` - do not use the return value to detect whether the data actually changed.
+
 ## Last insert ID
 
 ```php
@@ -101,7 +119,7 @@ $ran = Db::lock('invoice.generate.' . $invoiceId, timeout: 5, callback: function
 | `Db::values($table, $key, $val, $where)` | `array` | Fetch a key->value map from two columns. |
 | `Db::insert($table, $data)` | `int` | Insert a row. Returns affected row count. |
 | `Db::replace($table, $data)` | `int` | Replace a row. Returns affected row count. |
-| `Db::update($table, $data, $where)` | `int` | Update rows. Refuses empty `$where`. |
+| `Db::update($table, $data, $where)` | `int` | Update rows. Refuses empty `$where`. Returns matched (not changed) rows. |
 | `Db::delete($table, $where)` | `int` | Delete rows. Refuses empty `$where`. |
 | `Db::lastInsertId()` | `string` | Last auto-increment ID as a string. |
 | `Db::transaction($callback)` | `mixed` | Run callback in a transaction. Rolls back and re-throws on error. |

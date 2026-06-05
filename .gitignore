@@ -2,11 +2,13 @@
 config/framework.local.php
 framework.local.php
 
-# Generated bundle files — rebuilt on first request
+# Generated bundle files — rebuilt on first request (never commit; can go stale)
 cache/*.php
+framework/cache/*.php
 
 # Runtime logs
 logs/*
+framework/logs/*
 
 # IDE and OS
 .DS_Store
@@ -19,4 +21,4 @@ Thumbs.db
 
 # AI
 CLAUDE.md
-.clade/*
+.claude/*

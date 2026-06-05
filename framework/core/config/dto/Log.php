@@ -15,6 +15,7 @@ final readonly class Log
         public bool $rotateDaily,
         public int $retentionDays,
         public array $redactKeys,
+        public bool $redactSecrets,
     ) {
     }
 
@@ -26,6 +27,7 @@ final readonly class Log
             rotateDaily: Cast::bool($raw['rotate_daily'] ?? null, 'log.rotate_daily', true),
             retentionDays: Cast::int($raw['retention_days'] ?? null, 'log.retention_days', 14),
             redactKeys: Map::lowerStringList($raw, 'redact_keys'),
+            redactSecrets: Cast::bool($raw['redact_secrets'] ?? null, 'log.redact_secrets', true),
         );
     }
 }

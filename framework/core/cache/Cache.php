@@ -60,7 +60,8 @@ final class Cache
     public static function set(string $key, mixed $value, int $ttl = 0): bool
     {
         self::memory()->set($key, $value);
-        return self::apcu()->set($key, $value, $ttl);
+        $apcu = self::apcu();
+        return !$apcu->enabled() || $apcu->set($key, $value, $ttl);
     }
 
     /**

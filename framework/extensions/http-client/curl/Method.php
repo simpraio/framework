@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient\curl;
+namespace extensions\http_client\curl;
 
 final class Method
 {

@@ -69,6 +69,16 @@ Do not put application-specific logic in `core/`.
 - Static facades are part of the public API and should delegate to simple internal services.
 - Extensions must stay optional.
 
+## Code Comments
+
+- Prefer clear names and simple structure over explanatory comments.
+- Keep comments short and specific.
+- Add comments only when they preserve important context that the code cannot express clearly by itself.
+- Good comments explain security constraints, invariants, edge cases, deployment assumptions, data-format rules, or intentional trade-offs.
+- Avoid comments that restate what the next line of code already says.
+- Remove stale comments when behavior changes.
+- Do not add comments only to make code look documented or to silence tooling.
+
 ## Forbidden Direction
 
 Do not introduce:

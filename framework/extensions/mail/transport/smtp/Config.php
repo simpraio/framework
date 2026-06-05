@@ -6,11 +6,15 @@ namespace extensions\mail\transport\smtp;
 
 use core\config\Cast;
 use core\config\Map;
+use core\config\RedactsSecrets;
+use JsonSerializable;
 use RuntimeException;
 use SensitiveParameter;
 
-final readonly class Config
+final readonly class Config implements JsonSerializable
 {
+    use RedactsSecrets;
+
     public function __construct(
         public string $host,
         public int $port,
@@ -23,11 +27,17 @@ final readonly class Config
     ) {
     }
 
+    /** @return list<string> */
+    protected function secretKeys(): array
+    {
+        return ['password'];
+    }
+
     /** @param array<string, mixed> $raw */
     public static function fromArray(array $raw): self
     {
         $smtp = Map::section($raw, 'smtp');
-        $host = trim(Cast::string($smtp['host'] ?? null, 'extensions.mail.smtp.host'));
+        $host = Cast::trimmedString($smtp['host'] ?? null, 'extensions.mail.smtp.host');
 
         if ($host === '') {
             throw new RuntimeException('SMTP_HOST_MISSING');
@@ -37,11 +47,11 @@ final readonly class Config
             host: $host,
             port: max(1, Cast::int($smtp['port'] ?? null, 'extensions.mail.smtp.port', 587)),
             encryption: SmtpEncryption::tryFrom(
-                strtolower(trim(Cast::string($smtp['encryption'] ?? null, 'extensions.mail.smtp.encryption', 'tls')))
+                strtolower(Cast::trimmedString($smtp['encryption'] ?? null, 'extensions.mail.smtp.encryption', 'tls'))
             ) ?? SmtpEncryption::Tls,
             auth: Cast::bool($smtp['auth'] ?? null, 'extensions.mail.smtp.auth', true),
-            username: trim(Cast::string($smtp['username'] ?? null, 'extensions.mail.smtp.username')),
-            password: trim(Cast::string($smtp['password'] ?? null, 'extensions.mail.smtp.password')),
+            username: Cast::trimmedString($smtp['username'] ?? null, 'extensions.mail.smtp.username'),
+            password: Cast::trimmedString($smtp['password'] ?? null, 'extensions.mail.smtp.password'),
             timeout: max(1, Cast::int($smtp['timeout'] ?? null, 'extensions.mail.smtp.timeout', 30)),
         );
     }

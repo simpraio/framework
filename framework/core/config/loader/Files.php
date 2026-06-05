@@ -20,7 +20,14 @@ final readonly class Files
     public function configFiles(): array
     {
         $found = glob($this->paths->config . '/*.php');
-        return $found === false ? [] : array_values($found);
+        if ($found === false) {
+            return [];
+        }
+        // Sort for a deterministic merge order: glob() order is filesystem-dependent,
+        // so two files defining the same key could otherwise resolve differently across
+        // OS/filesystems (e.g. Windows dev vs Linux prod).
+        sort($found);
+        return array_values($found);
     }
 
     /**

@@ -30,14 +30,14 @@ The `auth_group`, `auth_user`, and `auth_access` database tables are required on
 | Call | Returns | Description |
 | --- | --- | --- |
 | `Auth::login($username, $password)` | `bool` | Validates credentials against the database. Regenerates the session on success, increments the lockout counter on failure. Returns `false` on bad credentials, lockout, or a disabled account. |
-| `Auth::logout( - $route)` | `Response` | Destroys the session and redirects to `logout_redirect`, or to `$route` when provided. |
+| `Auth::logout(?string $route = null)` | `Response` | Destroys the session and redirects to `logout_redirect`, or to `$route` when provided. |
 | `User::current()` | `object` | Returns the current session user object, or a guest object with `user_id = 0`. |
 | `User::isAuthenticated()` | `bool` | Returns `true` when a user is logged in (user_id > 0). |
 | `User::isGuest()` | `bool` | Returns `true` when no authenticated user is stored in the session. |
 | `User::id()` | `int` | Current user's ID, or 0 for guests. |
-| `User::group()` | ` - string` | Current user's group name, resolved from the `auth_group` table. |
+| `User::group()` | `?string` | Current user's group name, resolved from the `auth_group` table. |
 | `User::inGroup($groups)` | `bool` | Checks whether the current user belongs to one of the given group names (string or array). |
-| `User::profile( - $key, $default)` | `mixed` | Reads the current session user object, or a single field value when `$key` is given. |
+| `User::profile(?string $key = null, mixed $default = null)` | `mixed` | Reads the current session user object, or a single field value when `$key` is given. |
 | `Access::pathBlocks($pathId)` | `array` | Returns a map of block name -> bool for the current user and path. Used to show or hide template blocks per user or group. |
 
 The Boot class contributes two tokens and two blocks to the layout on every request:

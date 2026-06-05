@@ -114,7 +114,7 @@ Implementing `Bootable` adds a `boot()` method that runs once per request during
 public function boot(): void
 ```
 
-Use it for one-time setup that must happen early: registering error handlers, initialising static facades, or wiring event listeners. The `errorlog` extension uses it to attach an error handler callback; the `events` extension uses it to set up the global dispatcher.
+Use it for one-time setup that must happen early: registering error handlers, initialising static facades, or wiring event listeners. The `error-log` extension uses it to attach an error handler callback; the `events` extension uses it to set up the global dispatcher.
 
 ## Enabling & Disabling
 
@@ -135,10 +135,10 @@ Discovery order follows the filesystem (`glob()` order, typically alphabetical).
 | --- | --- | --- |
 | `auth` | Hook, Contributor | Session-based user authentication and per-route access control. Provides `User` static facade and `{USER_ID}`, `{USER_GROUP}` tokens. |
 | `csrf` | Hook | CSRF token validation on mutating requests (POST, PUT, PATCH, DELETE). Replaces `{_csrf}` placeholder with the token in HTML responses. |
-| `errorlog` | Bootable, Hook | Writes unhandled exceptions to the `error_log` database table. Prunes old entries daily. Schema: `tools/schema/errorlog.sql`. |
+| `error-log` | Bootable, Hook | Writes unhandled exceptions to the `error_log` database table. Prunes old entries daily. Schema: `tools/schema/error-log.sql`. |
 | `events` | Bootable | Initialises a global event dispatcher. Use the `Event` static facade to register listeners (`Event::on()`) and dispatch (`Event::dispatch()`). |
 | `flash` | Contributor | Session flash messages for validation errors and old input. Provides `Flash` static facade and the `{hasErrors}` block. |
-| `httpclient` | - | cURL-based HTTP client with retry logic, TLS verification, and response size limits. No hooks - purely a utility class (`HttpClient::get()`, `HttpClient::post()`). |
+| `http-client` | - | cURL-based HTTP client with retry logic, TLS verification, egress checks, and response size limits. No hooks - purely a utility class (`HttpClient::get()`, `HttpClient::post()`). |
 | `mail` | - | Email sending via SMTP or PHP `mail()`. No hooks - use the `Mail` static facade to compose and send messages from controllers. |
 | `profiler` | Hook | Appends a request-timing report as an HTML comment to every HTML response. Disabled by default - enable only in development. |
 | `ratelimit` | Hook | IP-based rate limiting. Returns `429 Too Many Requests` when the configured request count per window is exceeded. |

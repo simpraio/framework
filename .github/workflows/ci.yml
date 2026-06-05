@@ -6,8 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
+  syntax:
     name: PHP Syntax Check
     runs-on: ubuntu-latest
 
@@ -21,3 +25,32 @@ jobs:
 
       - name: Check syntax
         run: find framework -name "*.php" -print0 | xargs -0 -n1 php -l
+
+  static-analysis:
+    name: Mago (lint + analyze)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+
+      - name: Install Mago
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: curl --proto '=https' --tlsv1.2 -sSf https://carthage.software/mago.sh | bash -s -- --version=1.24.0
+
+      - name: Mago version
+        run: mago --version
+
+      - name: Mago lint
+        run: mago lint --minimum-report-level warning --minimum-fail-level warning --reporting-format short
+
+      - name: Mago analyze
+        run: mago analyze --minimum-report-level warning --minimum-fail-level warning --reporting-format short

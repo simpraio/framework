@@ -43,7 +43,7 @@ Cache::once('maintenance.purge', function (): void {
 }, ttl: 86400);
 ```
 
-`once()` returns `true` if the callback ran, `false` if it was skipped (already ran within the TTL). The errorlog extension uses this pattern to throttle its purge queries.
+`once()` returns `true` if the callback ran, `false` if it was skipped (already ran within the TTL). The error-log extension uses this pattern to throttle its purge queries.
 
 ## Atomic counter
 

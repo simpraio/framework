@@ -8,6 +8,15 @@ use RuntimeException;
 
 final class Connection
 {
+    /**
+     * TLS verification policy for implicit TLS and STARTTLS. Keep all checks strict.
+     */
+    private const array TLS_CONTEXT = [
+        'verify_peer' => true,
+        'verify_peer_name' => true,
+        'allow_self_signed' => false,
+    ];
+
     private mixed $socket;
 
     private function __construct(
@@ -27,11 +36,10 @@ final class Connection
             error_message: $error,
             timeout: $config->timeout,
             context: stream_context_create([
-                'ssl' => [
-                    'verify_peer' => true,
-                    'verify_peer_name' => true,
-                    'allow_self_signed' => false,
-                ],
+                // Pin peer_name explicitly: on the STARTTLS path the socket opens as plain
+                // TCP (no ssl:// address), so stream_socket_enable_crypto() has no host to
+                // derive the expected certificate name from unless we set it here.
+                'ssl' => [...self::TLS_CONTEXT, 'peer_name' => $config->host],
             ]),
         );
 

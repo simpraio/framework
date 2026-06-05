@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return [
     'extensions' => [
-        'errorlog' => [
+        'error-log' => [
             'enabled'        => false,
             'retention_days' => 30,
 

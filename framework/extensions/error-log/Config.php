@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\errorlog;
+namespace extensions\error_log;
 
 use core\config\Cast;
 use core\config\Config as CoreConfig;
@@ -10,7 +10,7 @@ use core\config\Map;
 
 final readonly class Config
 {
-    public const string NAME = 'errorlog';
+    public const string NAME = 'error-log';
     public const string DISABLED = 'ERRORLOG_DISABLED';
 
     /** @param list<string> $redactKeys */
@@ -25,9 +25,9 @@ final readonly class Config
     public static function fromArray(array $raw): self
     {
         return new self(
-            enabled:       Cast::bool($raw['enabled'] ?? null, 'extensions.errorlog.enabled', true),
-            retentionDays: max(0, Cast::int($raw['retention_days'] ?? null, 'extensions.errorlog.retention_days', 30)),
-            storeTrace:    Cast::bool($raw['store_trace'] ?? null, 'extensions.errorlog.store_trace', true),
+            enabled:       Cast::bool($raw['enabled'] ?? null, 'extensions.error-log.enabled', true),
+            retentionDays: max(0, Cast::int($raw['retention_days'] ?? null, 'extensions.error-log.retention_days', 30)),
+            storeTrace:    Cast::bool($raw['store_trace'] ?? null, 'extensions.error-log.store_trace', true),
             redactKeys:    Map::lowerStringList($raw, 'redact_keys'),
         );
     }

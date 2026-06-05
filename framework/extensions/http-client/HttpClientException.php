@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\httpclient;
+namespace extensions\http_client;
 
 use RuntimeException;
 

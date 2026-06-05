@@ -23,9 +23,9 @@ Two facades are available depending on the type of data:
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Registry::get($group, $key, $language)` | ` - string` | Returns a single value from the registry for the given group, key, and language. `$language` defaults to the current request language. |
+| `Registry::get($group, $key, $language)` | `?string` | Returns a single value from the registry for the given group, key, and language. `$language` defaults to the current request language. |
 | `Registry::group($group, $language)` | `array` | Returns all key-value pairs for a group and language as an associative array. |
-| `Settings::get($key, $default)` | ` - string` | Returns a single value from the reserved `system` group (language-agnostic). Use for global settings like site name or feature flags. |
+| `Settings::get($key, $default)` | `?string` | Returns a single value from the reserved `system` group (language-agnostic). Use for global settings like site name or feature flags. |
 | `Settings::all()` | `array` | Returns all key-value pairs in the system group. |
 
 ## Schema
@@ -62,8 +62,8 @@ public function compose(Template $template): Template|Response
     }
 
     return $template->tokens([
-        'HERO_HEADLINE' => $hero['headline'] " '',
-        'HERO_SUBLINE'  => $hero['subline'] " '',
+        'HERO_HEADLINE' => $hero['headline'] ?? '',
+        'HERO_SUBLINE'  => $hero['subline'] ?? '',
     ]);
 }
 ```

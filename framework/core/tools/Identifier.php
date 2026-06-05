@@ -8,6 +8,9 @@ use InvalidArgumentException;
 
 final class Identifier
 {
+    private static int $lastUuidMilliseconds = 0;
+    private static int $uuidSequence = 0;
+
     public static function code(
         int $length = 8,
         string $alphabet = '23456789ABCDEFGHJKMNPQRSTUVWXYZ',
@@ -37,23 +40,36 @@ final class Identifier
     }
 
     /**
-     * Generates a UUIDv7-shaped identifier.
+     * Generates UUIDv7-shaped IDs ordered within this PHP process.
      *
-     * The 48-bit timestamp prefix uses PHP-process wall-clock time (microtime), so values
-     * are k-sortable at millisecond granularity but NOT strictly monotonic: two calls within
-     * the same millisecond - whether in one process or across concurrent requests - share the
-     * same timestamp prefix and order only by their random tail. Uniqueness is preserved
-     * (74 bits of entropy per ms), but consumers must not assume strict ordering finer than 1 ms.
+     * The timestamp prefix is milliseconds. When multiple IDs are created in the
+     * same millisecond, or the clock moves backwards, rand_a is used as a
+     * per-process counter. If the counter is exhausted, the timestamp advances by 1ms.
      */
     public static function uuid(): string
     {
         $ms = (int)(microtime(true) * 1000);
+        if ($ms > self::$lastUuidMilliseconds) {
+            self::$uuidSequence = random_int(min: 0, max: 0x0fff);
+        }
+
+        if ($ms <= self::$lastUuidMilliseconds) {
+            $ms = self::$lastUuidMilliseconds;
+            self::$uuidSequence++;
+
+            if (self::$uuidSequence > 0x0fff) {
+                $ms = self::$lastUuidMilliseconds + 1;
+                self::$uuidSequence = 0;
+            }
+        }
+
+        self::$lastUuidMilliseconds = $ms;
 
         return sprintf(
             '%08x-%04x-%04x-%04x-%012x',
             ($ms >> 16) & 0xffff_ffff,
             $ms & 0xffff,
-            0x7000 | random_int(min: 0, max: 0x0fff),
+            0x7000 | self::$uuidSequence,
             0x8000 | random_int(min: 0, max: 0x3fff),
             random_int(min: 0, max: 0xffff_ffff_ffff),
         );

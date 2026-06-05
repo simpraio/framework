@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace extensions\errorlog;
+namespace extensions\error_log;
 
 use core\db\Db;
 use core\Request;

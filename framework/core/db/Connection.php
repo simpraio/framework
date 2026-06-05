@@ -167,9 +167,21 @@ final class Connection
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ];
 
-        if ($this->config->driver === 'mysql' && $this->config->timezone !== '') {
-            $defaults[PDO::MYSQL_ATTR_INIT_COMMAND] =
-                "SET time_zone = '" . self::tzOffset($this->config->timezone) . "'";
+        if ($this->config->driver === 'mysql') {
+            // Report matched rows (not just changed rows) from UPDATE rowCount(), so
+            // Db::update() can tell "matched but unchanged" (>0) from "no match" (0).
+            $foundRowsAttr = defined('Pdo\\Mysql::ATTR_FOUND_ROWS')
+                ? (int)constant('Pdo\\Mysql::ATTR_FOUND_ROWS')
+                : PDO::MYSQL_ATTR_FOUND_ROWS;
+            $defaults[$foundRowsAttr] = true;
+
+            if ($this->config->timezone !== '') {
+                $initCommandAttr = defined('Pdo\\Mysql::ATTR_INIT_COMMAND')
+                    ? (int)constant('Pdo\\Mysql::ATTR_INIT_COMMAND')
+                    : PDO::MYSQL_ATTR_INIT_COMMAND;
+                $defaults[$initCommandAttr] =
+                    "SET time_zone = '" . self::tzOffset($this->config->timezone) . "'";
+            }
         }
 
         /** @var array<int, mixed> $options */

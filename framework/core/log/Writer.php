@@ -49,7 +49,12 @@ final class Writer
         $suffix = '';
         if ($context !== []) {
             $context = $this->redactKeys === [] ? $context : self::scrub($context, $this->redactKeys);
-            $encoded = json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            // Keep logging usable when context contains invalid UTF-8 or binary-ish values.
+            $encoded = json_encode(
+                $context,
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+                    | JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE,
+            );
             $suffix = ' ' . ($encoded !== false ? $encoded : '{}');
         }
 

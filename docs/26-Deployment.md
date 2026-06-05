@@ -80,7 +80,7 @@ env[SIMPRA_DB_USER]   = simpra
 env[SIMPRA_DB_PASS]   = secret
 ```
 
-The bundle directory (`SIMPRA_BUNDLE_DIR`) must exist and be writable by the PHP-FPM user before the first request. For more detail, see [Configuration: Bundle Directory](02-Configuration.md#bundle-directory). If using tmpfs, recreate it on service startup:
+The framework can create the bundle directory recursively when the parent is writable. For production, pre-create it with the intended owner and permissions; for tmpfs paths, recreate it on service startup. For more detail, see [Configuration: Bundle Directory](02-Configuration.md#bundle-directory):
 
 ```
 # systemd ExecStartPre or similar
@@ -105,3 +105,13 @@ chmod 775 cache/ logs/
 ```
 
 Both directories must be outside the web root - `cache/` and `logs/` are in the project root, which is one level above `public/`, so they are never directly accessible via HTTP. Do not move them inside `public/`.
+
+## Updating Code or Configuration
+
+The framework compiles `config/*.php`, the extension map, and the core class list into bundle files in the bundle directory (`cache/` by default). **These bundles are rebuilt only when missing - there is no staleness check against the source files.** After changing any config file, adding/removing/renaming an extension, or upgrading the framework, you MUST clear the bundle directory so it regenerates on the next request:
+
+```
+rm -f cache/*.php        # or: php tests/clear_cache.php
+```
+
+If you deploy new code over a populated bundle directory without clearing it, the previously compiled config keeps being served - silently, with no error. A renamed config section, a newly disabled extension, or a new security setting is ignored, and the affected config DTOs fall back to their code defaults. Because several extensions default to `enabled = true` in code (the shipped config files disable them), a stale bundle can **silently re-enable an extension you intended to keep off**. Make clearing the bundle directory a mandatory step in your deploy pipeline: run it after the new code is in place and before the first request is served.

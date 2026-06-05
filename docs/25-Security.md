@@ -78,7 +78,7 @@ The error handler behaviour differs between debug and production mode, controlle
 
 4xx errors always show their standard message regardless of mode (e.g. `404 Not Found` is not a security-sensitive disclosure). 5xx details are suppressed in production.
 
-`display_errors` is disabled by the error handler in all modes - errors are never printed to the response by PHP itself. In production, all exceptions are logged to the application log (and to the `error_log` database table if the `errorlog` extension is enabled).
+`display_errors` is disabled by the error handler in all modes - errors are never printed to the response by PHP itself. In production, all exceptions are logged to the application log (and to the `error_log` database table if the `error-log` extension is enabled).
 
 ## Host Header Validation
 
@@ -92,6 +92,12 @@ Set `allowed_hosts` in `config/app.php` to prevent host header injection and cac
 
 An empty list (the default) disables the check - acceptable for development, not for production. The comparison is case-insensitive and uses strict equality.
 
+## Outbound Requests (SSRF / Egress)
+
+The `http-client` extension enforces an egress allowlist (`extensions.http-client.egress`): when enabled, requests may only target allowlisted hosts, and with `block_private_ips` on, an allowlisted host that resolves to a private or reserved IP is rejected as defense in depth. Redirect targets are checked against the same policy before they are followed. The outbound proxy is operator-config only and is never accepted as a per-request option (a request-supplied proxy would bypass the allowlist). See [Extension: HTTP Client](16-Extensions-Httpclient.md).
+
+The client follows up to five HTTP redirects manually instead of using cURL's automatic redirect handling, so each `Location` target is rechecked before the next request is made. When a redirect changes origin, sensitive request state (`Authorization`, `Proxy-Authorization`, `Cookie`, and explicit cookie-jar use) is stripped before the next hop.
+
 ## Production Checklist
 
 - Set `debug: false` - hides stack traces and internal paths from error responses.
@@ -104,3 +110,5 @@ An empty list (the default) disables the check - acceptable for development, not
 - Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, auth access, auth group, and error-log purge caches. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.
 - Use `tokens()` for all user-facing values; reserve `rawTokens()` for HTML you produced.
 - Validate and whitelist redirect destinations in your controllers before passing them to `Response::redirect()`.
+- Clear the bundle cache (`rm -f cache/*.php`) on every deploy after a config or framework change - stale bundles silently serve old config and can re-enable disabled extensions (see [Deployment: Updating Code or Configuration](26-Deployment.md#updating-code-or-configuration)).
+- For `http-client` egress, keep the allowlist narrow and include only the external hosts the application actually calls.

@@ -6,10 +6,20 @@ namespace core\config\dto;
 
 use core\config\Cast;
 use core\config\Map;
+use core\config\RedactsSecrets;
+use JsonSerializable;
 use SensitiveParameter;
 
-final readonly class Database
+final readonly class Database implements JsonSerializable
 {
+    use RedactsSecrets;
+
+    /** @return list<string> */
+    protected function secretKeys(): array
+    {
+        return ['password'];
+    }
+
     /** @param array<int|string, mixed> $options */
     public function __construct(
         public string $driver,

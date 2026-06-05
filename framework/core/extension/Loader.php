@@ -8,7 +8,8 @@ use core\config\Config;
 
 /**
  * Discovers extensions on disk, applies enabled-flag config, and instantiates
- * Boot classes. Returns lists segregated by interface.
+ * Boot classes. Hyphenated folder names map to underscored namespace segments
+ * (`http-client` -> `extensions\http_client`).
  *
  * @internal
  */
@@ -23,7 +24,7 @@ final class Loader
             if (!self::isEnabled($name, $configFile)) {
                 continue;
             }
-            $class = 'extensions\\' . $name . '\\Boot';
+            $class = 'extensions\\' . self::namespaceName($name) . '\\Boot';
             $file = "{$dir}/{$name}/Boot.php";
             if (is_file($file)) {
                 require_once $file;
@@ -92,7 +93,7 @@ final class Loader
             return filter_var($raw['enabled'] ?? true, FILTER_VALIDATE_BOOL);
         }
 
-        $class = 'extensions\\' . $name . '\\Config';
+        $class = 'extensions\\' . self::namespaceName($name) . '\\Config';
         if (!class_exists($class, false)) {
             require_once $configFile;
         }
@@ -114,5 +115,10 @@ final class Loader
         /** @var mixed $config */
         $config = $class::fromArray($raw);
         return is_object($config) ? $config : (object)['enabled' => true];
+    }
+
+    private static function namespaceName(string $folder): string
+    {
+        return str_replace(search: '-', replace: '_', subject: $folder);
     }
 }

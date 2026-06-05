@@ -33,11 +33,8 @@ final readonly class Compiler
      */
     public function compile(?array $defaults = null): array
     {
-        $merged = array_replace_recursive(
-            $defaults ?? $this->loadDefaults(),
-            $this->loadLocal(),
-            $this->env->load(),
-        );
+        $merged = self::merge($defaults ?? $this->loadDefaults(), $this->loadLocal());
+        $merged = self::merge($merged, $this->env->load());
 
         $this->assertRequired($merged);
         return $merged;
@@ -50,9 +47,43 @@ final readonly class Compiler
         foreach ($this->files->configFiles() as $path) {
             /** @var array<string, mixed> $data */
             $data = require $path;
-            $merged = array_replace_recursive($merged, $data);
+            $merged = self::merge($merged, $data);
         }
         return $merged;
+    }
+
+    /**
+     * Deep-merge $override onto $base for layered config.
+     *
+     * Associative arrays (maps) merge recursively, so a later layer can override a
+     * single nested key without restating the whole section. Lists and scalars are
+     * REPLACED wholesale: an override list is authoritative, so a local/env layer can
+     * shrink or clear a default list (e.g. egress allowlist, log.redact_keys, CORS
+     * origins) — which array_replace_recursive cannot do, since it overlays lists by
+     * index and leaves stale tail entries behind. An empty array override clears the value.
+     *
+     * @param array<string, mixed> $base
+     * @param array<string, mixed> $override
+     * @return array<string, mixed>
+     */
+    private static function merge(array $base, array $override): array
+    {
+        foreach (array_keys($override) as $key) {
+            /** @var mixed $value */
+            $value = $override[$key];
+
+            if (
+                is_array($value) && !array_is_list($value)
+                && array_key_exists($key, $base) && is_array($base[$key]) && !array_is_list($base[$key])
+            ) {
+                $base[$key] = self::merge(Map::stringKeyed($base[$key]), Map::stringKeyed($value));
+                continue;
+            }
+
+            $base[$key] = $value;
+        }
+
+        return $base;
     }
 
     /** @return array<string, mixed> */

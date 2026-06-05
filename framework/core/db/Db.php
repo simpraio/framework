@@ -67,10 +67,14 @@ final class Db
     /** @param array<string, mixed> $where */
     public static function count(string $table, array $where = []): int
     {
-        $sql = 'SELECT COUNT(*) FROM ' . self::ident($table)
-            . ($where ? ' WHERE ' . self::whereEq($where) : '');
+        $sql = 'SELECT COUNT(*) FROM ' . self::ident($table);
+        $params = [];
+        if ($where) {
+            [$clause, $params] = self::whereClause($where);
+            $sql .= ' WHERE ' . $clause;
+        }
         /** @var mixed $value */
-        $value = self::connection()->query($sql, array_values($where))->fetchColumn();
+        $value = self::connection()->query($sql, $params)->fetchColumn();
         return $value === false ? 0 : (int)$value;
     }
 
@@ -80,12 +84,13 @@ final class Db
         if (!$where) {
             throw new RuntimeException('value(): where is empty');
         }
+        [$clause, $params] = self::whereClause($where);
         $sql = 'SELECT ' . self::ident($column)
             . ' FROM ' . self::ident($table)
-            . ' WHERE ' . self::whereEq($where)
+            . ' WHERE ' . $clause
             . ' LIMIT 1';
         /** @var mixed $row */
-        $row = self::connection()->query($sql, array_values($where))->fetch(PDO::FETCH_NUM);
+        $row = self::connection()->query($sql, $params)->fetch(PDO::FETCH_NUM);
         if (!is_array($row) || !array_key_exists(0, $row)) {
             return null;
         }
@@ -100,10 +105,14 @@ final class Db
     public static function values(string $table, string $keyColumn, string $valueColumn, array $where = []): array
     {
         $sql = 'SELECT ' . self::ident($keyColumn) . ', ' . self::ident($valueColumn)
-            . ' FROM ' . self::ident($table)
-            . ($where ? ' WHERE ' . self::whereEq($where) : '');
+            . ' FROM ' . self::ident($table);
+        $params = [];
+        if ($where) {
+            [$clause, $params] = self::whereClause($where);
+            $sql .= ' WHERE ' . $clause;
+        }
 
-        return self::connection()->query($sql, array_values($where))->fetchAll(PDO::FETCH_KEY_PAIR);
+        return self::connection()->query($sql, $params)->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
     /** @param array<string, mixed> $data */
@@ -119,6 +128,10 @@ final class Db
     }
 
     /**
+     * Returns the number of rows matched by the WHERE clause (not just rows whose
+     * values changed) — the connection sets the PDO MySQL FOUND_ROWS option so a "matched but
+     * unchanged" update reports >0 rather than being indistinguishable from "no match".
+     *
      * @param array<string, mixed> $data
      * @param array<string, mixed> $where
      */
@@ -131,11 +144,12 @@ final class Db
             throw new RuntimeException('update(): where is empty (refusing unbounded UPDATE)');
         }
         $set = array_map(static fn(int|string $c): string => self::ident((string)$c) . ' = ?', array_keys($data));
+        [$clause, $whereParams] = self::whereClause($where);
         $sql = 'UPDATE ' . self::ident($table)
             . ' SET ' . implode(', ', $set)
-            . ' WHERE ' . self::whereEq($where);
+            . ' WHERE ' . $clause;
 
-        return self::connection()->execute($sql, [...array_values($data), ...array_values($where)]);
+        return self::connection()->execute($sql, [...array_values($data), ...$whereParams]);
     }
 
     /** @param array<string, mixed> $where */
@@ -144,9 +158,10 @@ final class Db
         if (!$where) {
             throw new RuntimeException('delete(): where is empty (refusing unbounded DELETE)');
         }
-        $sql = 'DELETE FROM ' . self::ident($table) . ' WHERE ' . self::whereEq($where);
+        [$clause, $params] = self::whereClause($where);
+        $sql = 'DELETE FROM ' . self::ident($table) . ' WHERE ' . $clause;
 
-        return self::connection()->execute($sql, array_values($where));
+        return self::connection()->execute($sql, $params);
     }
 
     public static function lastInsertId(): string
@@ -193,15 +208,47 @@ final class Db
         return self::$connection ??= (self::$resolver)();
     }
 
-    private static function whereEq(array $where): string
+    /**
+     * Build a WHERE fragment and its positional params from an equality map, keeping
+     * SQL and bindings in lock-step so callers can never pass mismatched parameters.
+     *
+     *   null         => `col` IS NULL          (no placeholder)
+     *   non-empty [] => `col` IN (?, ?, ...)   (one placeholder per element)
+     *   empty []     => 1 = 0                  (matches nothing; IN () is invalid SQL)
+     *   scalar       => `col` = ?              (one placeholder)
+     *
+     * @param array<string, mixed> $where
+     * @return array{0: string, 1: list<mixed>}
+     */
+    private static function whereClause(array $where): array
     {
-        return implode(
-            ' AND ',
-            array_map(
-                static fn(int|string $c): string => self::ident((string)$c) . ' = ?',
-                array_keys($where),
-            )
-        );
+        $conditions = [];
+        $params = [];
+
+        /** @var mixed $value */
+        foreach ($where as $column => $value) {
+            $col = self::ident($column);
+
+            if ($value === null) {
+                $conditions[] = $col . ' IS NULL';
+                continue;
+            }
+
+            if (is_array($value)) {
+                if ($value === []) {
+                    $conditions[] = '1 = 0';
+                    continue;
+                }
+                $conditions[] = $col . ' IN (' . implode(', ', array_fill(start_index: 0, count: count($value), value: '?')) . ')';
+                $params = array_merge($params, array_values($value));
+                continue;
+            }
+
+            $conditions[] = $col . ' = ?';
+            $params[] = $value;
+        }
+
+        return [implode(' AND ', $conditions), $params];
     }
 
     private static function ident(string $name): string

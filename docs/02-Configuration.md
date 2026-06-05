@@ -10,7 +10,7 @@ Configuration is built from three layers merged in order - each layer overrides 
 3. environment SIMPRA_* variables  -  always read live
 ```
 
-Layers are merged with `array_replace_recursive` - nested keys are deep-merged, so overriding one key inside a section does not wipe the rest of that section.
+Layers are deep-merged: nested maps (associative arrays) merge recursively, so overriding one key inside a section does not wipe the rest of that section. **Lists are replaced wholesale, not merged by index** - a later layer's list is authoritative, so a local or environment layer can shrink or clear a default list (e.g. an egress allowlist or `log.redact_keys`) rather than only overwriting it element-by-element. An empty array `[]` clears the value entirely.
 
 **What is cached:** all `config/*.php` files are bundled into `cache/config.php` on the first request. Subsequent requests load the bundle directly. **Local config and environment variables are never cached** - they are read fresh on every request so credentials and per-environment settings are never baked into committed files.
 
@@ -27,6 +27,7 @@ Defined in `config/app.php` under the `project` key:
     'url'           => '',               // canonical base URL (e.g. https://example.com)
     'allowed_hosts' => [],              // Host header whitelist - empty disables check
     'debug'         => false,           // true exposes stack traces - never in production
+    'max_json_depth' => 64,             // JSON request body nesting limit
 ],
 ```
 
@@ -81,10 +82,11 @@ Defined in `config/log.php`:
     'rotate_daily'   => true,      // create a new log file each day
     'retention_days' => 14,        // delete log files older than N days
     'redact_keys'    => [],        // context keys whose values are replaced with [REDACTED]
+    'redact_secrets' => true,      // mask secret-bearing config DTO fields in dumps/json
 ],
 ```
 
-Log files are written to `logs/`. `redact_keys` applies recursively and case-insensitively to context arrays passed to the logger - it does not scrub exception messages or stack traces. Use `#[\SensitiveParameter]` on method parameters holding secrets to keep them out of traces.
+Log files are written to `logs/`. `redact_keys` applies recursively and case-insensitively to context arrays passed to the logger - it does not scrub exception messages or stack traces. Use `#[\SensitiveParameter]` on method parameters holding secrets to keep them out of traces. `redact_secrets` masks secret-bearing config DTO fields when dumped through `var_dump()` or `json_encode()`.
 
 ## Database
 
@@ -141,7 +143,7 @@ From inside an extension's Boot class, prefer typed config via `CoreConfig::exte
 
 ## Environment Variables
 
-All `SIMPRA_*` variables map to config paths via `array_replace_recursive`. Empty or missing variables are silently skipped.
+All `SIMPRA_*` variables map to config paths and are merged in as the highest-precedence layer (same list-replace semantics as above). Empty or missing variables are silently skipped.
 
 ```
 SIMPRA_PROJECT_URL    ->  project.url
@@ -168,7 +170,7 @@ On the first request the framework writes compiled bundle files to `cache/` insi
 SIMPRA_BUNDLE_DIR=/run/simpra
 ```
 
-The directory must exist and be writable by the PHP process. If you use tmpfs, ensure that deployment or service startup recreates the directory after reboot - the framework will recreate the bundle files automatically on first request, but the directory itself must exist first.
+The framework creates the bundle directory recursively on first request when the parent is writable. In production, pre-create it when you need strict owner/mode control, especially for tmpfs paths such as `/run/simpra`.
 
 After changing any `config/*.php` default (not the local file or env vars), delete the bundle cache so it is rebuilt:
 

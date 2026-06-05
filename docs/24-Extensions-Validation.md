@@ -16,15 +16,15 @@ Instantiate `Validator` with any array (POST body, query params, API payload). C
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `->int($name, $min, $max, $optional)` | ` - int` | Validates an integer field. Optionally enforces a min/max range. |
-| `->float($name, $min, $max, $optional)` | ` - float` | Validates a float field. Optionally enforces a min/max range. |
-| `->string($name, $min, $max, $trim, $optional)` | ` - string` | Validates a string field. Optionally enforces min/max length and trims whitespace. |
-| `->bool($name, $optional)` | ` - bool` | Validates a boolean field (accepts `true`, `false`, `1`, `0`, `'true'`, `'false'`). |
-| `->email($name, $optional)` | ` - string` | Validates an email address using `FILTER_VALIDATE_EMAIL`. |
-| `->pattern($name, $pattern, $trim, $optional)` | ` - string` | Validates a string against a regex pattern. |
+| `->int($name, $min, $max, $optional)` | `?int` | Validates an integer field. Optionally enforces a min/max range. |
+| `->float($name, $min, $max, $optional)` | `?float` | Validates a float field. Optionally enforces a min/max range. |
+| `->string($name, $min, $max, $trim, $optional)` | `?string` | Validates a string field. Optionally enforces min/max length and trims whitespace. |
+| `->bool($name, $optional)` | `?bool` | Validates a boolean field (accepts `true`, `false`, `1`, `0`, `'true'`, `'false'`). |
+| `->email($name, $optional)` | `?string` | Validates an email address using `FILTER_VALIDATE_EMAIL`. |
+| `->pattern($name, $pattern, $trim, $optional)` | `?string` | Validates a string against a regex pattern. |
 | `->in($name, $choices, $optional)` | `mixed` | Validates that the field value is in the given array of allowed values (strict comparison). |
-| `->uuid($name, $version, $optional)` | ` - string` | Validates a UUID string. Optionally restricts to a specific version (1-5). |
-| `->datetime($name, $format, $optional)` | ` - DateTimeImmutable` | Validates and parses a datetime string using the given format (default `Y-m-d H:i:s`). |
+| `->uuid($name, $version, $optional)` | `?string` | Validates a UUID string. Optionally restricts to a specific version (1-8). |
+| `->datetime($name, $format, $optional)` | `?DateTimeImmutable` | Validates and parses a datetime string using the given format (default `Y-m-d H:i:s`). |
 | `->custom($name, $check, $error, $optional)` | `mixed` | Validates using a callable. The callable receives the raw value and must return `bool`. |
 | `->ok()` | `bool` | Returns `true` if no rule has failed so far. |
 | `->errors()` | `array` | Returns a field name -> error code map for every failed rule. Codes include values such as `required`, `email`, `min`, `max`, `pattern`, and custom codes you pass to `custom()`. |
