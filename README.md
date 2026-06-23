@@ -163,7 +163,13 @@ The committed `mago.toml` defines the project scan scope and rule thresholds.
 
 ## No Packagist / No Composer
 
-Simpra is cloned into your project, not installed as a Composer dependency. There is no Packagist package and no `composer.json`. This is intentional — the framework has no external dependencies and does not use autoloading conventions that require Composer.
+Simpra is cloned into your project, not installed as a Composer dependency. There is no Packagist package and no `composer.json`. This is intentional - the framework has no external dependencies and does not use autoloading conventions that require Composer.
+
+## Commercial Support
+
+Simpra is MIT licensed and free to use.
+
+Need help with architecture, migrations, performance optimization, security review, or custom development? Email [hello@simpra.io](mailto:hello@simpra.io).
 
 ## License
 
