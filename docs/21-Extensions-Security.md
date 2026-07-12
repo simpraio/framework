@@ -52,7 +52,7 @@ A realistic CSP for a project with external fonts and a CDN for images:
     'content-security-policy' =>
         "default-src 'self'; " .
         "script-src 'self' 'nonce-{_csp_nonce}'; " .
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
+        "style-src 'self' https://fonts.googleapis.com; " .
         "font-src 'self' https://fonts.gstatic.com; " .
         "img-src 'self' https://cdn.example.com data:; " .
         "connect-src 'self'; " .

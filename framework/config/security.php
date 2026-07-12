@@ -9,11 +9,11 @@ return [
         'security' => [
             'enabled' => true,
             'headers' => [
-                // Locks down everything to same-origin by default. 'unsafe-inline' kept on style-src
-                // for inline <style> blocks; remove it if your CSS is fully external.
+                // Locks down everything to same-origin by default. Styles are loaded from
+                // static assets only; do not add inline style attributes or <style> blocks.
                 'Content-Security-Policy' => "default-src 'self'; "
                     . "script-src 'self' 'nonce-" . Csp::NONCE_PLACEHOLDER . "'; "
-                    . "style-src 'self' 'unsafe-inline'; "
+                    . "style-src 'self'; "
                     . "img-src 'self' data:; "
                     . "font-src 'self'; "
                     . "connect-src 'self'; "

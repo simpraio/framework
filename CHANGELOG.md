@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - 2026-07-12
+
+### Changed
+
+- **Breaking:** the default Content-Security-Policy `style-src` no longer includes `'unsafe-inline'`. Inline `<style>` blocks and `style="…"` attributes are now blocked by the browser unless the CSS is served as an external stylesheet. If your application relies on inline styles, move them into a stylesheet under `public/` (recommended) or add `'unsafe-inline'` back to `style-src` in `config/security.php`.
+- The framework error page now loads its styles from `public/assets/css/error.css` instead of an inline `<style>` block, so the default error page still renders correctly under the tightened CSP.
+
 ## [2.0.0] - 2026-06-05
 
 ### Added

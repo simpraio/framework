@@ -61,6 +61,30 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 2.0.0 -> 3.0.0
+
+**Impact:** front-end only. Affects projects that enable the security headers
+extension and use inline styles. No code changes, config renames, or cache steps
+are required.
+
+### Required
+
+None.
+
+### Conditional
+
+1. If your templates use inline `<style>` blocks or `style="…"` attributes and you
+   enable the security headers extension, the tightened default CSP
+   (`style-src 'self'`, without `'unsafe-inline'`) will cause the browser to block
+   them. Either:
+   - move those styles into an external stylesheet served from `public/` (recommended), or
+   - re-add `'unsafe-inline'` to `style-src` in `config/security.php`.
+
+### Good to know
+
+- The framework's own error page now loads `public/assets/css/error.css`. As long
+  as you serve `public/` as your web root (the required setup), no action is needed.
+
 ## 1.0.0 -> 2.0.0
 
 **Impact:** config-only for most projects. Code changes are needed only if you
