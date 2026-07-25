@@ -122,7 +122,16 @@ final class Connection
             $result = $callback();
             $this->txCommit();
         } catch (Throwable $e) {
-            $this->txRollback();
+            // A failed commit leaves the transaction in an unknown state, so this rollback can
+            // fail too. Its exception must never displace $e, which names what actually broke
+            // the write.
+            // @mago-expect lint:no-empty-catch-clause -- swallowing is the point: $e is rethrown
+            // immediately below, and logging here would pull the log facade into the DB layer to
+            // say nothing $e does not.
+            try {
+                $this->txRollback();
+            } catch (Throwable) {
+            }
             throw $e;
         }
         return $result;
@@ -143,22 +152,37 @@ final class Connection
         $this->txDepth++;
     }
 
+    /**
+     * Both closers drop the depth BEFORE issuing their statement: the level is closed either way,
+     * and a decrement placed after a statement that throws would leave the connection permanently
+     * one level deep, nesting every later SAVEPOINT into a transaction that no longer exists.
+     */
     private function txCommit(): void
     {
         $pdo = $this->pdo();
-        $this->txDepth === 1
-            ? $pdo->commit()
-            : $pdo->exec('RELEASE SAVEPOINT level_' . ($this->txDepth - 1));
+        $depth = $this->txDepth;
         $this->txDepth--;
+
+        $depth === 1
+            ? $pdo->commit()
+            : $pdo->exec('RELEASE SAVEPOINT level_' . ($depth - 1));
     }
 
     private function txRollback(): void
     {
+        // Nothing open - the level was already closed, so there is no savepoint to roll back to
+        // and issuing one would only raise a second, misleading error.
+        if ($this->txDepth === 0) {
+            return;
+        }
+
         $pdo = $this->pdo();
-        $this->txDepth === 1
-            ? $pdo->rollBack()
-            : $pdo->exec('ROLLBACK TO SAVEPOINT level_' . ($this->txDepth - 1));
+        $depth = $this->txDepth;
         $this->txDepth--;
+
+        $depth === 1
+            ? $pdo->rollBack()
+            : $pdo->exec('ROLLBACK TO SAVEPOINT level_' . ($depth - 1));
     }
 
     private function connect(): PDO

@@ -6,6 +6,12 @@ namespace core\config\dto;
 
 use core\config\Cast;
 
+/**
+ * `secure` defaults to FALSE so a plain-HTTP development host needs no configuration. The shipped
+ * config/session.php sets it to true, so the default is only reachable by deleting the key - which
+ * makes the session cookie sendable over plain HTTP. Treat a missing session.secure as a
+ * configuration error, not a default.
+ */
 final readonly class Session
 {
     public function __construct(
@@ -30,7 +36,9 @@ final readonly class Session
             domain: Cast::string($raw['domain'] ?? null, 'session.domain'),
             secure: Cast::bool($raw['secure'] ?? null, 'session.secure'),
             httpOnly: Cast::bool($raw['http_only'] ?? null, 'session.http_only', true),
-            sameSite: Cast::string($raw['same_site'] ?? null, 'session.same_site', 'Lax'),
+            // An unrecognised SameSite is emitted verbatim and then ignored by the browser,
+            // silently weakening the cookie, so reject it at boot instead.
+            sameSite: Cast::oneOf($raw['same_site'] ?? null, 'session.same_site', ['Lax', 'Strict', 'None'], 'Lax'),
             savePath: Cast::string($raw['save_path'] ?? null, 'session.save_path'),
         );
     }

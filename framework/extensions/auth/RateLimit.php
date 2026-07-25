@@ -12,9 +12,14 @@ use RuntimeException;
 
 /**
  * Login throttling. Two axes:
- *   - per-IP+username: tight (rateLimitAttempts) - stops single-IP brute force.
- *   - per-username:    looser (rateLimitAttempts * 4) - caps distributed
- *                      enumeration of one account from many IPs.
+ *   - per-IP+username: tight (rateLimitAttempts) - stops one-host account guessing.
+ *   - per-IP:          looser (rateLimitAttempts * 4) - stops one host enumerating users.
+ *
+ * There is deliberately no blocking per-username counter: it made every account remotely
+ * lockable. An unauthenticated attacker who knows a username only has to spread bad passwords
+ * across source addresses to keep that account blocked, denying service to the real user while
+ * never touching a credential. Both counters here are anchored to the source address, so a
+ * failure can only throttle the host that produced it.
  *
  * Fixed-window: each counter's TTL is anchored to its first creation and is
  * not refreshed by subsequent fail() calls. An attacker pacing failures at
@@ -30,30 +35,30 @@ use RuntimeException;
  */
 final class RateLimit
 {
-    private static function ipKey(string $username): string
+    private static function pairKey(string $username): string
     {
         return 'auth.login.rl.' . Identifier::fastHash(strtolower($username) . '|' . Request::ip());
     }
 
-    private static function userKey(string $username): string
+    private static function ipKey(): string
     {
-        return 'auth.login.rl.u.' . Identifier::fastHash(strtolower($username));
+        return 'auth.login.rl.ip.' . Identifier::fastHash(Request::ip());
     }
 
     public static function blocked(string $username): bool
     {
         $config = Config::enabled();
 
-        $ipKey = self::ipKey($username);
-        $userKey = self::userKey($username);
+        $pairKey = self::pairKey($username);
+        $ipKey = self::ipKey();
 
-        $ipAttempts = max((int) Cache::get($ipKey, 0), self::fileGet($ipKey));
-        if ($ipAttempts >= $config->rateLimitAttempts) {
+        $pairAttempts = max((int) Cache::get($pairKey, 0), self::fileGet($pairKey));
+        if ($pairAttempts >= $config->rateLimitAttempts) {
             return true;
         }
 
-        $userAttempts = max((int) Cache::get($userKey, 0), self::fileGet($userKey));
-        return $userAttempts >= $config->rateLimitAttempts * 4;
+        $ipAttempts = max((int) Cache::get($ipKey, 0), self::fileGet($ipKey));
+        return $ipAttempts >= $config->rateLimitAttempts * 4;
     }
 
     public static function fail(string $username): void
@@ -61,26 +66,29 @@ final class RateLimit
         $config = Config::enabled();
 
         $window = $config->rateLimitWindow;
-        $ipKey = self::ipKey($username);
-        $userKey = self::userKey($username);
+        $pairKey = self::pairKey($username);
+        $ipKey = self::ipKey();
 
+        $pairCount = Cache::inc($pairKey, 1, $window);
         $ipCount = Cache::inc($ipKey, 1, $window);
-        $userCount = Cache::inc($userKey, 1, $window);
 
-        if ($ipCount === false || $userCount === false) {
+        if ($pairCount === false || $ipCount === false) {
+            self::fileInc($pairKey, $window);
             self::fileInc($ipKey, $window);
-            self::fileInc($userKey, $window);
         }
     }
 
+    /**
+     * Clears the successful login's own (username + IP) counter only. The looser per-IP counter is
+     * left standing on purpose: one valid credential must not reset the enumeration budget a host
+     * spent guessing other accounts.
+     */
     public static function clear(string $username): void
     {
         Config::enabled();
 
-        Cache::delete(self::ipKey($username));
-        Cache::delete(self::userKey($username));
-        self::fileDelete(self::ipKey($username));
-        self::fileDelete(self::userKey($username));
+        Cache::delete(self::pairKey($username));
+        self::fileDelete(self::pairKey($username));
     }
 
     private static function fileGet(string $key): int
@@ -114,21 +122,30 @@ final class RateLimit
             }
 
             $counter = self::fileReadHandle($fp);
-            $now = time();
-            $attempts = ($counter === null || $counter['expires'] <= $now)
-                ? 1
-                : $counter['attempts'] + 1;
-
-            self::fileWriteHandle($fp, [
-                'attempts' => $attempts,
-                'expires' => $now + $window,
-            ]);
+            self::fileWriteHandle($fp, self::nextCounter($counter, time(), $window));
 
             return;
         } finally {
             flock($fp, LOCK_UN);
             fclose($fp);
         }
+    }
+
+    /**
+     * Increment a fixed window: a live counter keeps its original expiry, only a missing or
+     * expired one starts a new window. This matches the APCu path, where Cache::inc anchors the
+     * TTL to the counter's creation.
+     *
+     * @param array{attempts: int, expires: int}|null $counter
+     * @return array{attempts: int, expires: int}
+     */
+    private static function nextCounter(?array $counter, int $now, int $window): array
+    {
+        if ($counter === null || $counter['expires'] <= $now) {
+            return ['attempts' => 1, 'expires' => $now + $window];
+        }
+
+        return ['attempts' => $counter['attempts'] + 1, 'expires' => $counter['expires']];
     }
 
     private static function fileDelete(string $key): void

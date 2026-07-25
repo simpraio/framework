@@ -52,11 +52,40 @@ final class Cast
         if (is_bool($value)) {
             return $value;
         }
+        // filter_var() reads a blank string as FALSE rather than as a failure, which would let a
+        // whitespace-only value silently disable whatever the key controls while int() and
+        // string() reject the same input. Rejected explicitly instead.
+        if (is_string($value) && trim($value) === '') {
+            throw new RuntimeException("Config: '{$field}' must be a boolean, got a blank string.");
+        }
         $coerced = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
         if ($coerced === null) {
             throw new RuntimeException("Config: '{$field}' must be a boolean, got " . get_debug_type($value));
         }
         return $coerced;
+    }
+
+    /**
+     * A string restricted to a fixed set of accepted values, matched case-insensitively and
+     * returned in the canonical spelling from $allowed. For config keys that are effectively
+     * enums (log level, cookie SameSite), where an unvalidated typo is accepted and surfaces later
+     * as wrong behaviour instead of a boot error.
+     *
+     * @param non-empty-list<string> $allowed canonical spellings
+     */
+    public static function oneOf(mixed $value, string $field, array $allowed, string $default): string
+    {
+        $candidate = self::string($value, $field, $default);
+
+        foreach ($allowed as $option) {
+            if (strcasecmp($candidate, $option) === 0) {
+                return $option;
+            }
+        }
+
+        throw new RuntimeException(
+            "Config: '{$field}' must be one of " . implode(', ', $allowed) . ", got '{$candidate}'."
+        );
     }
 
     public static function string(mixed $value, string $field, string $default = ''): string

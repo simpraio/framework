@@ -25,6 +25,18 @@ return [
 
 The `auth_group`, `auth_user`, and `auth_access` database tables are required once auth is enabled. Schemas are in `tools/schema/auth.sql`.
 
+## Session lifetime and throttling
+
+Every `revalidate_interval` seconds a request re-checks the session against `auth_user` and destroys it unless the account is still `active` and still holds the credential it logged in with. Practical consequences:
+
+- Changing or resetting a password signs out sessions that already carry the previous credential fingerprint, including the session that just did the change. Use it as the response to a compromised account. Sessions created before this feature existed are adopted on first revalidation; if a password is changed before such a legacy session is adopted, there is no old fingerprint to compare.
+- Setting `status` to `disabled` or `deleted` ends the user's existing sessions too, not just future logins.
+- A group change takes effect within `revalidate_interval`; the user does not have to log out and back in.
+
+Failed logins are throttled on two counters, both keyed on the request's source address: `login_attempts` failures for one `(username + IP)` pair, and four times that for the address as a whole. Nothing is counted per username alone, so a third party cannot lock an account out by failing logins against it from elsewhere. The address is `REMOTE_ADDR`, never a forwarded-for header, so it cannot be spoofed from outside - but that also means a deployment where PHP sees a proxy instead of the client shares one address counter across all users, and the address must be corrected at the front end for the limiter to distinguish them.
+
+Counters live in APCu when available, otherwise in locked files under the system temp directory. Both are host-local, so behind several front-ends each one throttles independently.
+
 ## Public API
 
 | Call | Returns | Description |

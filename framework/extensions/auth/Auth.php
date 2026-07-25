@@ -51,6 +51,10 @@ final class Auth
             return false;
         }
 
+        // Bind the session to the credential it was issued for, so a later password change or
+        // reset invalidates it on the next revalidation (see State::revalidated). Derived before
+        // the hash is dropped; only the digest is stored, never the hash.
+        $user['credential_fingerprint'] = State::credentialFingerprint($passwordHash);
         unset($user['password']);
         $user['last_validated_at'] = time();
 

@@ -138,7 +138,7 @@ Discovery order follows the filesystem (`glob()` order, typically alphabetical).
 | `error-log` | Bootable, Hook | Writes unhandled exceptions to the `error_log` database table. Prunes old entries daily. Schema: `tools/schema/error-log.sql`. |
 | `events` | Bootable | Initialises a global event dispatcher. Use the `Event` static facade to register listeners (`Event::on()`) and dispatch (`Event::dispatch()`). |
 | `flash` | Contributor | Session flash messages for validation errors and old input. Provides `Flash` static facade and the `{hasErrors}` block. |
-| `http-client` | - | cURL-based HTTP client with retry logic, TLS verification, egress checks, and response size limits. No hooks - purely a utility class (`HttpClient::get()`, `HttpClient::post()`). |
+| `http-client` | Bootable | cURL-based HTTP client with retry logic, TLS verification, egress checks, and response size limits. Used mainly as a utility class (`HttpClient::get()`, `HttpClient::post()`); its `Bootable` boot only emits a startup warning when TLS verification is disabled. |
 | `mail` | - | Email sending via SMTP or PHP `mail()`. No hooks - use the `Mail` static facade to compose and send messages from controllers. |
 | `profiler` | Hook | Appends a request-timing report as an HTML comment to every HTML response. Disabled by default - enable only in development. |
 | `ratelimit` | Hook | IP-based rate limiting. Returns `429 Too Many Requests` when the configured request count per window is exceeded. |

@@ -146,6 +146,10 @@ final class Kernel
     private function validateHost(HttpRequest $request): void
     {
         $allowedHosts = Config::project()->allowedHosts;
+        // An empty list disables the check, and is the DTO's default: a deployment that never sets
+        // project.allowed_hosts accepts any Host header. That holds only while nothing trusts the
+        // header - project.url is the canonical origin for generated links. Set allowed_hosts on
+        // every deployed host regardless.
         if ($allowedHosts === []) {
             return;
         }

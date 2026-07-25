@@ -80,6 +80,8 @@ The error handler behaviour differs between debug and production mode, controlle
 
 `display_errors` is disabled by the error handler in all modes - errors are never printed to the response by PHP itself. In production, all exceptions are logged to the application log (and to the `error_log` database table if the `error-log` extension is enabled).
 
+`401` and `403` responses are also recorded, at `warning` level, with the request method, route path and `REMOTE_ADDR` - enough to audit whether a route was ever refused and from where. Other 4xx responses stay unlogged so a `404` sweep cannot flood the log. The query string is deliberately not recorded because it may carry credentials or personal data, and the username is not either: the denial is logged by the core error handler, which has no notion of identity. Log that in your own controller if you need it.
+
 ## Host Header Validation
 
 Set `allowed_hosts` in `config/app.php` to prevent host header injection and cache poisoning. Requests with a `Host` header not in the list receive `400 Bad Request` before any routing occurs.
@@ -104,7 +106,7 @@ The client follows up to five HTTP redirects manually instead of using cURL's au
 - Set `allowed_hosts` - prevents host header injection; leave empty only during development.
 - Serve only the `public/` directory from the web root - the project root must never be publicly accessible.
 - Keep secrets (database passwords, API keys) out of committed config files - use environment variables or a local config override.
-- Set `session.secure: true` - session cookies are HTTPS-only by default; do not override this in production.
+- Keep `session.secure: true` - the shipped `config/session.php` sets it, but deleting the key falls back to `false`, which lets the session cookie travel over plain HTTP. Treat a missing `session.secure` as a configuration error, not a default.
 - Enable the `csrf` extension and add `{_csrf}` to every unsafe form.
 - Enable the `security` extension (on by default) and review the CSP policy for your specific assets and third-party origins.
 - Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, auth access, auth group, and error-log purge caches. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.

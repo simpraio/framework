@@ -2,15 +2,17 @@
 
 declare(strict_types=1);
 
-namespace core;
+namespace core\error;
 
+use core\ErrorHandler;
+use core\View;
 use core\config\Config;
 use core\http\HttpException;
 use core\tools\Format;
 use RuntimeException;
 use Throwable;
 
-final class ErrorPage
+final class Page
 {
     public function __construct(
         private readonly bool $debug,

@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace core;
 
-use core\config\Config;
+use core\error\Page;
+use core\error\SecurityHeaders;
 use core\http\HttpException;
 use core\log\Writer;
 use ErrorException;
@@ -82,6 +83,9 @@ final class ErrorHandler
         if ($status >= 500) {
             self::log($e);
         }
+        if ($status === 401 || $status === 403) {
+            self::logDenial($status);
+        }
 
         if (PHP_SAPI === 'cli') {
             fwrite(STDERR, self::page()->text($e) . PHP_EOL);
@@ -91,57 +95,56 @@ final class ErrorHandler
         if (!headers_sent()) {
             http_response_code($status);
             header('Content-Type: text/html; charset=UTF-8');
-            self::emitSecurityHeaders();
+            SecurityHeaders::emit(self::$debug);
         }
 
         echo self::page()->html($e, $status);
     }
 
     /**
-     * Apply the same security headers the security extension would, since
-     * error pages bypass the normal Response/Extensions pipeline. Reads the
-     * security config directly. Falls back silently if the extension is
-     * disabled, missing, or config isn't initialized yet (very early errors).
+     * Record an access-control denial. 4xx responses are otherwise unlogged on purpose - a 404
+     * sweep would drown the log - but 401 and 403 are decisions about who may reach what, and a
+     * deployment with no record of them cannot answer "was this route ever refused, and to whom".
      *
-     * Error pages are always HTML, so no content-type filtering is needed -
-     * every header in the security config applies.
+     * Identity belongs to the auth extension, not core, so only the request coordinates are
+     * recorded here; a product that needs the username should log it where it makes the decision.
+     * Written at WARNING so it survives the default threshold, and never allowed to throw: a
+     * failed audit write must not turn a 403 into a 500.
      */
-    private static function emitSecurityHeaders(): void
+    private static function logDenial(int $status): void
     {
+        if (self::$log === null) {
+            return;
+        }
+
         try {
-            $raw = Config::extension('security');
+            /** @var mixed $requestUri */
+            $requestUri = $_SERVER['REQUEST_URI'] ?? null;
+            $path = is_string($requestUri)
+                ? parse_url(substr(string: $requestUri, offset: 0, length: 2_048), PHP_URL_PATH)
+                : null;
 
-            /** @var mixed $enabled */
-            $enabled = $raw['enabled'] ?? true;
-            if (!filter_var($enabled, FILTER_VALIDATE_BOOL)) {
-                return;
-            }
-
-            /** @var mixed $headers */
-            $headers = $raw['headers'] ?? [];
-            if (!is_array($headers)) {
-                return;
-            }
-
-            foreach (array_keys($headers) as $name) {
-                self::emitSecurityHeader($name, $headers[$name]);
-            }
-        } catch (Throwable $headerFailure) {
-            if (self::$debug) {
-                error_log('ErrorHandler: security headers skipped: ' . $headerFailure->getMessage());
-            }
+            self::$log->log(Writer::WARNING, "Access denied ({$status})", [
+                'method' => substr(string: self::serverValue('REQUEST_METHOD'), offset: 0, length: 16),
+                // Query values may contain credentials or PII. The route path is sufficient
+                // for access-control auditing and is bounded against log amplification.
+                'path' => substr(
+                    string: is_string($path) ? $path : '/',
+                    offset: 0,
+                    length: 512,
+                ),
+                'ip' => substr(string: self::serverValue('REMOTE_ADDR'), offset: 0, length: 45),
+            ]);
+        } catch (Throwable $writeFailure) {
+            error_log('ErrorHandler: denial log write failed: ' . $writeFailure->getMessage());
         }
     }
 
-    private static function emitSecurityHeader(int|string $name, mixed $value): void
+    private static function serverValue(string $key): string
     {
-        if (!is_string($name) || !is_string($value) || $value === '') {
-            return;
-        }
-        if (preg_match('/[\r\n\0]/', $name . $value) === 1) {
-            return;
-        }
-        header($name . ': ' . $value, replace: true);
+        /** @var mixed $value */
+        $value = $_SERVER[$key] ?? null;
+        return is_string($value) ? $value : '';
     }
 
     private static function statusOf(Throwable $e): int
@@ -185,8 +188,8 @@ final class ErrorHandler
         }
     }
 
-    private static function page(): ErrorPage
+    private static function page(): Page
     {
-        return new ErrorPage(self::$debug, self::$view);
+        return new Page(self::$debug, self::$view);
     }
 }

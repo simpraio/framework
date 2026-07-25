@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.0.0] - 2026-07-26
+
+### Added
+
+- `401` and `403` responses are logged at `warning` with the request method, route path and `REMOTE_ADDR`. Other 4xx responses stay unlogged so a `404` sweep cannot flood the log. The query string is omitted because it may carry credentials or personal data, and the username is not recorded because the denial is logged by the core error handler, which has no notion of identity.
+- `Cast::oneOf()` for configuration keys that are effectively enums: it matches case-insensitively, returns the canonical spelling, and rejects anything else at boot.
+
+### Changed
+
+- **Breaking:** `log.level` and `session.same_site` are now validated against their accepted values (`debug`, `info`, `warning`, `error` and `Lax`, `Strict`, `None`) instead of accepting any string, so **a deployment carrying an invalid value no longer starts** — it fails at boot with a message naming the key. Check both keys before upgrading. Values are matched case-insensitively, so existing spellings such as `lax` keep working. Both failed silently before: a misspelled `log.level` made every log call raise "Undefined array key", which the error handler promoted to a 500, while an unrecognised `same_site` was emitted verbatim and then ignored by the browser, quietly weakening the cookie without otherwise disturbing the application.
+- Session revalidation also refreshes `group_id` from the database, so a group change takes effect within `revalidate_interval` instead of only at the user's next login.
+- **Breaking:** `Cast::bool()` rejects a blank or whitespace-only string instead of reading it as `false`, so a boolean config key set to `''` now fails at boot rather than silently resolving to `false`. `filter_var()` maps `''` to `false` rather than to a failure, so such a value quietly disabled whatever the key controlled while `Cast::int()` and `Cast::string()` rejected the same input.
+- **Breaking:** error-page internals moved into a `core\error` subsystem: `core\ErrorPage` is now `core\error\Page`, and the security-header emission extracted from `core\ErrorHandler` is now `core\error\SecurityHeaders`. The `core\ErrorHandler` facade and its behavior are unchanged; update any project code that referenced `core\ErrorPage` directly.
+
+### Fixed
+
+- Transaction depth is now dropped before the `COMMIT`/`ROLLBACK` statement is issued. A statement that threw previously left the connection permanently one level deep, so every later transaction in the request nested a `SAVEPOINT` into a transaction that no longer existed. The rollback attempted after a failed commit also no longer replaces the caller's exception with "there is no active transaction", so the deadlock or lost connection that actually broke the write is the one reported.
+- `Cache::remember()` releases its stampede lock even when the callback throws. The lock previously survived for its full TTL, so with a one-hour entry every request for an hour lost the lock, slept, re-checked a still-empty key and computed anyway.
+- The logger no longer throws on an unrecognised level, regardless of validation: an unknown message level is treated as an error so it is surfaced rather than filtered away, and an unknown threshold falls back to the default. `Log::setLevel()` is public API, so the level can still arrive unvalidated at runtime.
+- The login-throttle fallback used when APCu is unavailable behaved as a sliding window: it rewrote each counter's expiry on every failed attempt, so a host that kept failing held its own block open indefinitely — locking out everyone sharing that address. It now honors the documented fixed window, matching the APCu path.
+
+### Security
+
+- Login throttling no longer keeps a blocking per-username counter. It let an unauthenticated attacker lock any known account out of the application by distributing failed logins across source addresses — no credential needed, and no recourse for the real user. Both counters are now anchored to the source address: a tight `(username + IP)` counter, plus a looser per-IP counter that still caps one host enumerating many accounts.
+- A session is now bound to the credential it was issued for. `Auth::login()` stores a fingerprint of the stored password hash and session revalidation re-derives and compares it, so **changing or resetting a password signs out fingerprinted sessions** instead of leaving them valid until they expire. Sessions created before this release carry no fingerprint and are upgraded in place on their first revalidation, so upgrading does not log everyone out; a password change made before a legacy session is first revalidated cannot revoke that session by fingerprint because no old fingerprint exists yet.
+- Error pages no longer publish an unfilled CSP nonce. They render outside the Response/Extensions pipeline, so the security extension never substitutes the `{_csp_nonce}` placeholder, and `'nonce-{_csp_nonce}'` was emitted verbatim — a fixed, source-visible value that looked like a working control. The whole `'nonce-...'` expression is dropped instead, leaving error pages under the same policy without the nonce, which is stricter.
+
 ## [3.0.0] - 2026-07-12
 
 ### Changed

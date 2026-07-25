@@ -25,6 +25,8 @@ return [
 
 Use `{_csp_nonce}` in CSP header values and matching script tags to allow trusted inline scripts without enabling `'unsafe-inline'`. The security extension replaces it with a fresh random nonce for each HTML response.
 
+Error pages are the one exception: they are rendered outside the extension pipeline, so nothing substitutes the placeholder. Rather than publish a fixed, source-visible nonce, the error handler drops the whole `'nonce-...'` expression from the header and keeps the rest of the policy, which leaves error pages under a stricter CSP than normal responses. Inline scripts must therefore never be relied on in error templates.
+
 ```
 <script nonce="{_csp_nonce}">
     window.appReady = true

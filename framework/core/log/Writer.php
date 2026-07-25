@@ -42,7 +42,12 @@ final class Writer
     /** @param array<string, mixed> $context */
     public function log(string $level, string $message, array $context = []): void
     {
-        if (self::LEVELS[$level] < self::LEVELS[$this->level]) {
+        // The logger must never throw: both levels arrive as strings from outside (Log::setLevel()
+        // is public API), and an unindexed key here would surface as an exception on every log
+        // call. An unrecognised message level counts as an error so it is surfaced rather than
+        // filtered away; an unrecognised threshold falls back to the default.
+        $severity = self::LEVELS[$level] ?? self::LEVELS[self::ERROR];
+        if ($severity < (self::LEVELS[$this->level] ?? self::LEVELS[self::WARNING])) {
             return;
         }
 

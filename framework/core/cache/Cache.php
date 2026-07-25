@@ -217,11 +217,15 @@ final class Cache
             }
         }
 
-        $value = $callback();
-        self::set($key, $value, $ttl);
-
-        if ($lockKey !== null) {
-            $apcu->delete($lockKey);
+        try {
+            $value = $callback();
+            self::set($key, $value, $ttl);
+        } finally {
+            // Released even when the callback throws, or the lock survives for its whole TTL and
+            // every caller in that window waits on it only to compute anyway.
+            if ($lockKey !== null) {
+                $apcu->delete($lockKey);
+            }
         }
 
         return $value;

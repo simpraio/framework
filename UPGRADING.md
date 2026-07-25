@@ -61,6 +61,60 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 3.0.0 -> 4.0.0
+
+**Impact:** config check required before deploying. Configuration is now validated
+at boot, so a project carrying an invalid value **stops starting** instead of
+misbehaving quietly - that is why this is a major release. Auth behavior also
+changes for password resets. No schema changes.
+
+### Required
+
+1. Audit your config for values that are now rejected at boot. Each one throws with
+   the offending key named, so a single invalid value stops the application from
+   starting:
+
+   ```text
+   log.level          debug | info | warning | error
+   session.same_site  Lax | Strict | None
+   any boolean key    must not be '' or whitespace - set true or false explicitly
+   ```
+
+   Check every layer, including `config/framework.local.php`, `framework.local.php`
+   and `SIMPRA_*` environment variables, since any of them can supply the value.
+   Spelling is matched case-insensitively, so `lax` is still fine. Note that
+   `notice` and `critical` were never real log levels — earlier docs listed them by
+   mistake, and a project that copied them was already breaking every log call at
+   runtime.
+
+2. Clear the bundle cache on deploy, as always:
+
+   ```sh
+   rm -f cache/*.php
+   ```
+
+### Conditional
+
+1. If your project code references `core\ErrorPage` directly, it is now
+   `core\error\Page`. The `core\ErrorHandler` facade is unchanged, so projects that
+   only rely on the framework's error handling need no change.
+
+### Good to know
+
+- Changing or resetting a password now signs out sessions that already carry a
+  credential fingerprint, on the next revalidation (within `revalidate_interval`).
+  Plan for it if your password-reset flow assumed the current session survived.
+  Sessions created before this release are upgraded in place on their first
+  revalidation, so upgrading does not log everyone out; a password change made
+  before a legacy session is first revalidated cannot revoke that session by
+  fingerprint because no old fingerprint exists yet.
+- A group change now takes effect within `revalidate_interval` instead of at the
+  user's next login.
+- `401` and `403` responses are now logged at `warning`. Expect new entries in the
+  application log, and check your log volume if you run a noisy public endpoint.
+- Login throttling no longer counts failures per username alone, so a third party
+  can no longer lock an account out by failing logins against it from elsewhere.
+
 ## 2.0.0 -> 3.0.0
 
 **Impact:** front-end only. Affects projects that enable the security headers

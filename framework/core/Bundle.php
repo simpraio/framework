@@ -14,6 +14,12 @@ use RuntimeException;
  * Source files are wrapped in bracketed namespace blocks; the result is
  * functionally equivalent to including each file directly.
  *
+ * A missing bundle is the only rebuild trigger; bundles are never compared against their sources.
+ * Edited core/, extensions/ or config/ files therefore stay invisible until the bundle file is
+ * deleted, so a deployment MUST remove the bundle directory. A deployment that preserves it keeps
+ * serving the previous release's framework code. Freshness is not checked at runtime because that
+ * would mean stat-ing every source file on every request - the cost bundling exists to avoid.
+ *
  * @internal
  */
 final class Bundle

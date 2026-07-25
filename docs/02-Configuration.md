@@ -78,7 +78,7 @@ Defined in `config/log.php`:
 
 ```
 'log' => [
-    'level'          => 'warning', // debug | info | notice | warning | error | critical
+    'level'          => 'warning', // debug | info | warning | error - any other value is rejected at boot
     'rotate_daily'   => true,      // create a new log file each day
     'retention_days' => 14,        // delete log files older than N days
     'redact_keys'    => [],        // context keys whose values are replaced with [REDACTED]
