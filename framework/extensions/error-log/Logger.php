@@ -6,7 +6,6 @@ namespace extensions\error_log;
 
 use core\db\Db;
 use core\Request;
-use core\tools\Format;
 use Throwable;
 
 final class Logger
@@ -20,8 +19,11 @@ final class Logger
         $config ??= Config::enabled();
 
         try {
+            // created_at is left to the column DEFAULT so the row and the purge below share ONE
+            // clock (the DB session, which the framework pins to database.timezone). Stamping it
+            // here with Format::datetime() wrote the DISPLAY timezone, which the purge's NOW()
+            // never matched once the two zones differed.
             Db::insert('error_log', [
-                'created_at' => Format::datetime(),
                 'exception' => self::truncate($e::class, 191),
                 'message' => self::truncate($e->getMessage(), 65_535),
                 'file' => self::truncate($e->getFile(), 512),

@@ -105,7 +105,7 @@ final class Config
             throw new RuntimeException('Missing required config paths: ' . implode(', ', $missing));
         }
 
-        return self::$database = Database::fromArray(self::section('database'), self::$project->timezone);
+        return self::$database = Database::fromArray(self::section('database'));
     }
 
     public static function session(): Session

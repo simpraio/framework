@@ -7,7 +7,6 @@ namespace extensions\auth;
 use core\db\Db;
 use core\http\Response;
 use core\Session;
-use core\tools\Format;
 
 final class Auth
 {
@@ -67,7 +66,10 @@ final class Auth
 
         RateLimit::clear($username);
 
-        Db::update('auth_user', ['last_login_at' => Format::datetime()], ['user_id' => (int)$user['user_id']]);
+        Db::execute(
+            'UPDATE `auth_user` SET `last_login_at` = UTC_TIMESTAMP(6) WHERE `user_id` = :user_id',
+            ['user_id' => (int)$user['user_id']],
+        );
 
         return true;
     }
