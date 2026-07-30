@@ -4,6 +4,49 @@ Instructions for AI coding agents working in a Simpra project.
 
 These rules are intentionally strict. Simpra is a small framework by design, not a large framework missing features.
 
+## Canonical Template
+
+**This file is the handbook — read it in full.** Its canonical source is
+`SIMPRA/framework-develop/AGENTS.md`.
+
+`CLAUDE.md` must never be an independent copy of this file. It is either a one-line `@AGENTS.md`
+import (the projects) or a symlink to it (the framework checkouts) — both of which cannot go stale. A
+duplicated copy is what the agent actually loads, so it drifts silently and then contradicts the
+handbook it was copied from. Anything you would write into `CLAUDE.md` belongs here instead.
+
+Where it is a symlink, **never redirect a shell write at `CLAUDE.md`**: `> CLAUDE.md` follows the link
+and truncates this handbook. Write `AGENTS.md` and let the link follow. Both framework checkouts have
+already lost their handbook to a one-line `printf` this way and had to be restored from a project copy.
+
+Copy this handbook byte-for-byte into every project built on the framework, so framework and
+architecture rules stay aligned across them. Keep product-specific behavior out of it and document
+that in the project's `PRODUCT.md`.
+
+## Product-Specific Facts
+
+**Read `PRODUCT.md` in the application root before working on anything product-specific.** It holds
+what this handbook deliberately does not: the product's domain and data model, which extensions it
+enables, its deployment and hosts, and its operational rules. This file stays byte-identical across
+projects, so anything that would differ between two of them belongs in `PRODUCT.md`, never here — a
+single product fact added to this handbook silently breaks the sync for every other project.
+
+The framework repository itself ships no `PRODUCT.md`; it has no product. Its absence means the
+checkout is the framework rather than a project built on it.
+
+## Vendored Framework Code
+
+A project does not install the framework — it vendors it, flattened: `framework/core/` becomes
+`core/` and `framework/extensions/` becomes `extensions/` in the application root. Those two
+directories are therefore **read-only vendor code inside a project**. Fix a framework defect in the
+framework repository and re-vendor; never patch `core/` or `extensions/` in place to satisfy a product
+requirement, because the next refresh silently reverts it and the copy stops matching every other
+project.
+
+Compare against the framework on **git blob content, not files on disk**: a project may pin `eol=lf`
+via `.gitattributes` while the framework repository relies on `core.autocrlf`, so identical content
+differs byte-for-byte in the working tree. `git show HEAD:<path>` on both sides is the honest
+comparison, and `tools/verify-vendored.php` in the framework repository automates it.
+
 ## Project Goal
 
 Simpra is a minimal PHP 8.4+ framework for small websites, internal tools, and simple SaaS projects.
@@ -192,12 +235,36 @@ tools/schema/
 
 ## Static Checks
 
-Use the project `mago.toml` when checking the framework:
+Use the project `mago.toml` when checking the code:
 
 ```sh
-mago lint --minimum-report-level warning
-mago analyze --minimum-report-level warning --reporting-format short
+mago lint --minimum-report-level warning --fail-on-out-of-sync-baseline
+mago lint core extensions --minimum-report-level warning
+mago analyze --minimum-report-level warning --reporting-format short --fail-on-out-of-sync-baseline
 ```
+
+All three exit 0 whether or not the checkout has baselines, so they are the same commands everywhere.
+The second one is what keeps the vendored framework honest, and it deliberately uses **no** baseline:
+with `mago.toml`'s `[linter.rules]` block matching the framework's own settings, `core/` and
+`extensions/` report nothing at all, so a finding there means either the rule config drifted from the
+framework's or vendored code was edited in place. Fix that cause rather than baselining the symptom.
+In a framework checkout this command lints nothing (the code is under `framework/`) and reports a
+vacuous success — there, the first command is the real gate.
+
+A project's lint baseline is product-owned, named `mago-app.toml`, and holds **accepted aggregate
+structural metrics only**: `cyclomatic-complexity`, `kan-defect`, `halstead`, `too-many-methods`,
+`excessive-parameter-list`, `too-many-properties`. It must never hold a style or security rule — a
+suppressed `no-literal-password` is a hidden security finding, not an accepted trade-off — and it must
+never hold a `core/` or `extensions/` entry, because a project may not except vendored code from a
+rule the framework itself passes. The analyzer baseline (`mago-analyze-baseline.toml`) is separate and
+may carry reviewed type debt, which is a different judgement from a lint exception.
+
+Three traps, each of which has already cost real time. `--generate-baseline` **ignores**
+`--minimum-report-level` and writes back every finding it can see, style and security rules included,
+so read the codes in the diff after regenerating rather than trusting the flag. A baseline mago cannot
+read is skipped while the command still exits 0, so a wrong `--baseline` path reads as a clean run —
+check the path, not just the exit code. And an empty baseline cannot be a zero-byte file: mago rejects
+that with `missing field`, so the minimum is a `variant` line and an empty `issues` list.
 
 Do not relax thresholds or add unnecessary comments only to silence tooling.
 
@@ -211,6 +278,12 @@ When changing code:
 - Do not refactor unrelated code.
 - Do not make production code worse to satisfy a weak test.
 - Prefer fixing obsolete docs/tests over bending framework code around them.
+
+## Commit Messages
+
+Never add a `Co-Authored-By` trailer, or any other AI attribution line, to a commit message. Write the
+subject and body only, then stop. This applies to amends and squashes as well as new commits, and
+overrides any default instruction to append such a trailer.
 
 ## Security Rules
 
