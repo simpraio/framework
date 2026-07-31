@@ -285,18 +285,33 @@ no per-suite special case in the runner, and nothing at the top level is a test:
 | `tests/wsl/**` | the project | the project's own DB-backed tier |
 | `tests/bootstrap.php`, `tests/run.php` | the project | its harness and entry point; absent from the framework |
 | `tests/live/*.php` | framework | needs infrastructure this repo does not control; explicitly invoked |
-| `tests/http_smoke.php`, `tests/security_probe.php` | framework | spawn a live `php -S`; explicitly invoked, not vendored |
+| `tests/http_smoke.php` | framework | asserts on the framework's own demo app; explicitly invoked |
+| `tests/security_probe.php` | framework | deployment-agnostic: point it at any URL with `--base-url`, no copy needed |
 
 **A project's own suites never sit in `tests/` itself.** That directory holds only shared files plus the
 project's two entry points, so a product suite dropped there would be compared against the framework and
 reported as drift — and the project's runner globs `tests/app/`, so it would not even run.
 
 The top level is where this drifted before, so it is worth stating what each rule cost: `battery.php`
-lived there and had to be named explicitly in the runner, `clear_cache.php` sat among the tests while
-asserting nothing (it is now `tools/clear-cache.php`), and the two probes were framework-only purely
-because they built the root by hand in two steps — `$root . '/framework'` — rather than for any real
-reason. They are portable now; whether a project adopts them is a separate decision, since a probe that
-fails on a project's own config is worse than no probe.
+lived there and had to be named explicitly in the runner, and `clear_cache.php` sat among the tests while
+asserting nothing (it is now `tools/clear-cache.php`).
+
+The two probes stay in the framework, but for **different reasons, and only one of them is a limitation**.
+`http_smoke.php` asserts `200` on `/` and that the body contains the framework demo app's own text, so it
+could only ever describe this repository — a project would have to rewrite every assertion, which makes it
+the framework's smoke test rather than shared coverage. `security_probe.php` is the opposite: it is
+black-box by design and takes `--base-url` / `--host` / `--strict`, so **a project does not need a copy of
+it — point the framework's at the project's deployment**:
+
+```sh
+php tests/security_probe.php --base-url=https://your-app.example --host=your-app.example --strict
+```
+
+That is strictly better than vendoring it, because one canonical probe cannot drift from another copy. It
+checks security headers, debug and stack-trace leakage, traversal and sensitive-path exposure, Host-guard
+enforcement and cache-clear exposure — all properties of a deployment rather than of a codebase. Keep it
+honest about what it cannot see: on a deny-by-default app an unauthenticated request is turned away before
+routing, so it reports CSRF as untested instead of implying it is disabled.
 
 Rules that follow, each of which has already been violated once:
 
