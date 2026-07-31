@@ -304,14 +304,17 @@ black-box by design and takes `--base-url` / `--host` / `--strict`, so **a proje
 it — point the framework's at the project's deployment**:
 
 ```sh
-php tests/security_probe.php --base-url=https://your-app.example --host=your-app.example --strict
+php tests/security_probe.php --base-url=https://your-app.example --host=your-app.example \
+    --csrf-path=/login --strict
 ```
 
 That is strictly better than vendoring it, because one canonical probe cannot drift from another copy. It
 checks security headers, debug and stack-trace leakage, traversal and sensitive-path exposure, Host-guard
-enforcement and cache-clear exposure — all properties of a deployment rather than of a codebase. Keep it
-honest about what it cannot see: on a deny-by-default app an unauthenticated request is turned away before
-routing, so it reports CSRF as untested instead of implying it is disabled.
+enforcement and cache-clear exposure — all properties of a deployment rather than of a codebase.
+
+`--csrf-path` matters on a deny-by-default app: an unauthenticated POST to `/` is turned away before any
+route sees it, so CSRF cannot be observed there and the probe says so rather than implying it is disabled.
+Point it at a public form route — the sign-in route — and it becomes a real assertion.
 
 Rules that follow, each of which has already been violated once:
 
