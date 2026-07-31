@@ -274,17 +274,29 @@ Do not relax thresholds or add unnecessary comments only to silence tooling.
 The generic suite is **shared**, byte-identical, and vendored into every project exactly like `core/`
 and `extensions/`. What belongs where follows from ownership, and nothing else:
 
+**Every suite lives in a discovered group directory. The top level holds only infrastructure.** There is
+no per-suite special case in the runner, and nothing at the top level is a test:
+
 | Path | Owner | Runs how |
 |---|---|---|
-| `tests/core/*.php`, `tests/extensions/*.php` | framework — synced verbatim | subprocess per file, via `tests/run_all.php` |
-| `tests/root.php`, `tests/helpers.php`, `tests/battery.php`, `tests/run_all.php` | framework — synced verbatim | infrastructure and the generic runner |
+| `tests/core/*.php`, `tests/extensions/*.php`, `tests/integration/*.php` | framework — synced verbatim | subprocess per file, discovered by `tests/run_all.php` |
+| `tests/root.php`, `tests/helpers.php`, `tests/run_all.php` | framework — synced verbatim | shared infrastructure and the generic runner |
 | `tests/app/*.php` | the project | in-process, via the project's `tests/run.php` |
 | `tests/wsl/**` | the project | the project's own DB-backed tier |
+| `tests/bootstrap.php`, `tests/run.php` | the project | its harness and entry point; absent from the framework |
 | `tests/live/*.php` | framework | needs infrastructure this repo does not control; explicitly invoked |
+| `tests/http_smoke.php`, `tests/security_probe.php` | framework | spawn a live `php -S`; explicitly invoked, not vendored |
 
-**A project's own tests never sit in `tests/` itself.** That directory holds only the shared files, so a
-product suite dropped there would be compared against the framework and reported as drift — and the
-project's runner globs `tests/app/`, so it would not even run.
+**A project's own suites never sit in `tests/` itself.** That directory holds only shared files plus the
+project's two entry points, so a product suite dropped there would be compared against the framework and
+reported as drift — and the project's runner globs `tests/app/`, so it would not even run.
+
+The top level is where this drifted before, so it is worth stating what each rule cost: `battery.php`
+lived there and had to be named explicitly in the runner, `clear_cache.php` sat among the tests while
+asserting nothing (it is now `tools/clear-cache.php`), and the two probes were framework-only purely
+because they built the root by hand in two steps — `$root . '/framework'` — rather than for any real
+reason. They are portable now; whether a project adopts them is a separate decision, since a probe that
+fails on a project's own config is worse than no probe.
 
 Rules that follow, each of which has already been violated once:
 
