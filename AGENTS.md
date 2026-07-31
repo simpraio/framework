@@ -9,14 +9,15 @@ These rules are intentionally strict. Simpra is a small framework by design, not
 **This file is the handbook — read it in full.** Its canonical source is
 `SIMPRA/framework-develop/AGENTS.md`.
 
-`CLAUDE.md` must never be an independent copy of this file. It is either a one-line `@AGENTS.md`
-import (the projects) or a symlink to it (the framework checkouts) — both of which cannot go stale. A
-duplicated copy is what the agent actually loads, so it drifts silently and then contradicts the
-handbook it was copied from. Anything you would write into `CLAUDE.md` belongs here instead.
+`CLAUDE.md` must never be an independent copy of this file. In every checkout it is the single line
+`@AGENTS.md`, which imports this one and therefore cannot go stale. A duplicated copy is what the agent
+actually loads, so it drifts silently and then contradicts the handbook it was copied from. Anything you
+would write into `CLAUDE.md` belongs here instead.
 
-Where it is a symlink, **never redirect a shell write at `CLAUDE.md`**: `> CLAUDE.md` follows the link
-and truncates this handbook. Write `AGENTS.md` and let the link follow. Both framework checkouts have
-already lost their handbook to a one-line `printf` this way and had to be restored from a project copy.
+**Never redirect a shell write at `CLAUDE.md`** — write `AGENTS.md`. Both framework checkouts once kept
+`CLAUDE.md` as a symlink to this file, and a one-line `printf >` aimed at the link truncated the handbook
+itself; it had to be restored from a project copy. They are plain one-line imports now, but the habit is
+the point: `CLAUDE.md` is a pointer, never a destination.
 
 Copy this handbook byte-for-byte into every project built on the framework, so framework and
 architecture rules stay aligned across them. Keep product-specific behavior out of it and document
@@ -267,6 +268,48 @@ check the path, not just the exit code. And an empty baseline cannot be a zero-b
 that with `missing field`, so the minimum is a `variant` line and an empty `issues` list.
 
 Do not relax thresholds or add unnecessary comments only to silence tooling.
+
+## Test Layout Contract
+
+The generic suite is **shared**, byte-identical, and vendored into every project exactly like `core/`
+and `extensions/`. What belongs where follows from ownership, and nothing else:
+
+| Path | Owner | Runs how |
+|---|---|---|
+| `tests/core/*.php`, `tests/extensions/*.php` | framework — synced verbatim | subprocess per file, via `tests/run_all.php` |
+| `tests/root.php`, `tests/helpers.php`, `tests/battery.php`, `tests/run_all.php` | framework — synced verbatim | infrastructure and the generic runner |
+| `tests/app/*.php` | the project | in-process, via the project's `tests/run.php` |
+| `tests/wsl/**` | the project | the project's own DB-backed tier |
+| `tests/live/*.php` | framework | needs the real internet or SMTP; outside the default run |
+
+**A project's own tests never sit in `tests/` itself.** That directory holds only the shared files, so a
+product suite dropped there would be compared against the framework and reported as drift — and the
+project's runner globs `tests/app/`, so it would not even run.
+
+Rules that follow, each of which has already been violated once:
+
+- **Never hardcode the layout.** `tests/root.php` defines `SIMPRA_ROOT` (the directory holding `core/`
+  and `extensions/`) and `SIMPRA_LOCAL` (the local config, at the checkout root here and at
+  `config/framework.local.php` in a project). Writing `framework/` into a test makes it framework-only,
+  which is exactly why the suite could not be shared for as long as it could not.
+- **Prove portability in a flattened copy, never in a framework checkout.** Green here proves nothing:
+  copy `framework/.` plus `tests/` into a scratch directory with the local config at `config/` only, and
+  run the whole suite there. Two of the three hardcoded idioms were invisible until someone did.
+- **Suites are discovered, never listed.** A hardcoded list drifted once and silently dropped
+  `core/bundle_dir_override`, which existed and passed and never ran.
+- **A generic suite must SKIP, not fail, when the environment legitimately lacks what it needs.** A
+  project points at a real database with a least-privilege user, so DDL may be denied and a framework
+  table may not exist. Print `[SKIP] <reason>` and `exit(0)`: the runner treats a skip-with-no-assertions
+  as a skip rather than a pass, so coverage is not silently claimed. `skipWithoutDdl()` in
+  `tests/helpers.php` is the shared guard.
+- **Benchmarks are not tests — they live in `tools/bench/`.** They report timings and cannot pass or
+  fail, and needing a special case in the test runner was the signal that they were in the wrong place.
+- **Moving a test file changes every `dirname(__DIR__, N)` in it.** A wrong depth in a `require` throws
+  loudly, but a wrong depth in an `is_dir()` guard evaluates false and SKIPS the suite while the run
+  stays green. Re-derive the depth for every moved file; never bulk-edit.
+- The two tiers use different execution models on purpose. Product suites share one bootstrap
+  in-process; generic suites each boot the framework and so must get their own process. A project's
+  `tests/run.php` runs its own tier and then delegates to the vendored `run_all.php`.
 
 ## Change Discipline
 
