@@ -245,10 +245,12 @@ mago analyze --minimum-report-level warning --reporting-format short --fail-on-o
 ```
 
 All three exit 0 whether or not the checkout has baselines, so they are the same commands everywhere.
-The second one is what keeps the vendored framework honest, and it deliberately uses **no** baseline:
-with `mago.toml`'s `[linter.rules]` block matching the framework's own settings, `core/` and
-`extensions/` report nothing at all, so a finding there means either the rule config drifted from the
-framework's or vendored code was edited in place. Fix that cause rather than baselining the symptom.
+The second one is what keeps the vendored framework honest. It passes no `--baseline` of its own, but do
+not read that as running unbaselined: `mago.toml` declares one, so the project's `mago-app.toml` is loaded
+anyway — it simply holds **no entries applicable to those paths**. That is the actual invariant. With
+`mago.toml`'s `[linter.rules]` block matching the framework's own settings, `core/` and `extensions/`
+report nothing at all, so a finding there means either the rule config drifted from the framework's or
+vendored code was edited in place. Fix that cause rather than baselining the symptom.
 In a framework checkout this command lints nothing (the code is under `framework/`) and reports a
 vacuous success — there, the first command is the real gate.
 
