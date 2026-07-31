@@ -280,7 +280,7 @@ and `extensions/`. What belongs where follows from ownership, and nothing else:
 | `tests/root.php`, `tests/helpers.php`, `tests/battery.php`, `tests/run_all.php` | framework — synced verbatim | infrastructure and the generic runner |
 | `tests/app/*.php` | the project | in-process, via the project's `tests/run.php` |
 | `tests/wsl/**` | the project | the project's own DB-backed tier |
-| `tests/live/*.php` | framework | needs the real internet or SMTP; outside the default run |
+| `tests/live/*.php` | framework | needs infrastructure this repo does not control; explicitly invoked |
 
 **A project's own tests never sit in `tests/` itself.** That directory holds only the shared files, so a
 product suite dropped there would be compared against the framework and reported as drift — and the
@@ -302,6 +302,18 @@ Rules that follow, each of which has already been violated once:
   table may not exist. Print `[SKIP] <reason>` and `exit(0)`: the runner treats a skip-with-no-assertions
   as a skip rather than a pass, so coverage is not silently claimed. `skipWithoutDdl()` in
   `tests/helpers.php` is the shared guard.
+- **`tests/live/` is about ownership of the dependency, not about being "integration".** A suite that
+  needs *your own* database belongs in `tests/core/` or `tests/extensions/` with a skip guard — that is
+  where the six DB-backed suites live, which is also why this repository needs no separate database tier
+  at all. `tests/live/` is only for suites depending on infrastructure nobody here controls: today
+  `http-client.php` (httpbin.org) and `mail.php`/`mail_attachment.php` (a real SMTP relay). Keeping those
+  out of the default run means a routine test run never pings a third party. Applying that test moved
+  `live/translation.php` into `extensions/translation_store.php`, where it belongs: it only ever needed
+  the local database, and hiding in `live/` meant nobody noticed it had been failing on a disabled
+  extension.
+- **Shared test infrastructure goes in `tests/helpers.php`, not copy-pasted per suite.**
+  `enableExtension()` existed as four identical local copies that had already drifted apart in one
+  detail, and a fifth suite silently lacked it.
 - **Benchmarks are not tests — they live in `tools/bench/`.** They report timings and cannot pass or
   fail, and needing a special case in the test runner was the signal that they were in the wrong place.
 - **Moving a test file changes every `dirname(__DIR__, N)` in it.** A wrong depth in a `require` throws
