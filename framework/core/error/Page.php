@@ -58,8 +58,6 @@ final class Page
                 'FILE' => $exposeDetails ? $e->getFile() : '',
                 'LINE' => $exposeDetails ? (string) $e->getLine() : '',
                 'TRACE' => $exposeDetails ? $e->getTraceAsString() : '',
-                'SQL_QUERY' => '',
-                'SQL_BINDS' => '',
                 'URL' => $url,
             ])
             ->blocks([
@@ -68,7 +66,6 @@ final class Page
                 'isBug' => $isBug,
                 'isDebug' => $this->debug && $isBug,
                 'isNotDebug' => !$this->debug && $isBug,
-                'isSQL' => false,
             ])
             ->render();
     }
@@ -110,10 +107,10 @@ final class Page
 
     private function fallbackDebug(Throwable $e): string
     {
-        $title = htmlspecialchars($e::class, flags: ENT_QUOTES, encoding: 'UTF-8');
-        $msg = htmlspecialchars($e->getMessage(), flags: ENT_QUOTES, encoding: 'UTF-8');
-        $file = htmlspecialchars($e->getFile(), flags: ENT_QUOTES, encoding: 'UTF-8');
-        $trace = htmlspecialchars($e->getTraceAsString(), flags: ENT_QUOTES, encoding: 'UTF-8');
+        $title = Format::escape($e::class, trim: false);
+        $msg = Format::escape($e->getMessage(), trim: false);
+        $file = Format::escape($e->getFile(), trim: false);
+        $trace = Format::escape($e->getTraceAsString(), trim: false);
         $line = (string) $e->getLine();
 
         return self::fallbackHtml($title, <<<HTML
@@ -136,6 +133,7 @@ final class Page
     private static function fallbackHtml(string $title, string $content, bool $debug = false): string
     {
         $cardClass = $debug ? ' class="debug"' : '';
+        $project = Format::escape(self::projectName(), trim: false);
 
         return <<<HTML
             <!doctype html>
@@ -143,12 +141,14 @@ final class Page
             <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="robots" content="noindex, nofollow">
+            <meta name="color-scheme" content="light dark">
             <title>{$title}</title>
             <link rel="stylesheet" href="/assets/css/error.css">
             </head>
             <body>
             <main{$cardClass}>
-            <a class="brand" href="https://simpra.io/" target="_blank" rel="noopener noreferrer" aria-label="Simpra website">&gt; simpra_</a>
+            <a class="brand" href="/" aria-label="{$project} home">&gt; {$project}</a>
             {$content}
             </main>
             </body>

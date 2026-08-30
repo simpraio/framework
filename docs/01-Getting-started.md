@@ -23,8 +23,12 @@ Make sure you have the following before starting:
 ## Setup Steps
 
 1. Install PHP 8.4 or newer and verify it is available with `php -v`. `pdo_mysql` is only required when DB-backed features are enabled; `apcu` is recommended for production caching and required when `ratelimit` is enabled.
-2. Clone the framework: `git clone https://github.com/simpraio/framework my-project`
-3. Add a `.gitignore` before making any commits. At minimum, exclude `framework.local.php`, `logs/`, and `cache/` so secrets and runtime files are never committed.
+2. Clone the source checkout, then copy the contents of its `framework/` directory into
+   your application root. Copy `tools/` and `VERSION` alongside it so schemas, maintenance
+   tools, and the installed-version marker are available at the paths used in this guide.
+3. Initialize your application repository and add a `.gitignore` before making any commits.
+   At minimum, exclude `framework.local.php`, `logs/`, and `cache/` so secrets and runtime
+   files are never committed.
 4. Create `config/framework.local.php` with your local project URL and debug setting - see [Add Local Config](#add-local-config) below for the exact content.
 5. Run the built-in PHP server pointed at `public/`. You should see the framework welcome page at `http://127.0.0.1:8000`. If the port is busy, change `8000` to any free port. The first request compiles framework bundles and may take a moment longer than subsequent requests.
 6. Choose which extensions your project needs. Open the relevant `config/*.php` file and set `'enabled' => true` to activate it.
@@ -32,9 +36,14 @@ Make sure you have the following before starting:
 8. Build your app in `modules/`, `templates/`, and `app/`.
 
 ```
-# 1. get the framework
-git clone https://github.com/simpraio/framework my-project
+# 1. get the source and create a flattened application root
+git clone https://github.com/simpraio/framework simpra-source
+mkdir my-project
+cp -R simpra-source/framework/. my-project/
+cp -R simpra-source/tools my-project/
+cp simpra-source/VERSION my-project/
 cd my-project
+git init
 
 # 2. protect secrets before the first commit (Linux / macOS)
 echo "config/framework.local.php" >> .gitignore

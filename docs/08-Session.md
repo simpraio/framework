@@ -1,6 +1,6 @@
 # Session
 
-`core\Session` is a static facade over the session store. The framework starts the session automatically - you do not call `session_start()`. Session cookie behaviour (name, lifetime, `Secure`, `HttpOnly`, `SameSite`) is controlled by `config/session.php`.
+`core\Session` is a static facade over the session store. The framework starts the session on the first read or write - you do not call `session_start()`. A request that never touches session data sends no session cookie. Session cookie and cache-header behaviour is controlled by `config/session.php`.
 
 ## Reading and writing
 
@@ -27,8 +27,8 @@ $returnUrl = Session::pull('return_url', '/dashboard');
 Always regenerate after privilege changes (login, sudo, role escalation):
 
 ```php
-Session::regenerate();           // regenerate and delete old session data
-Session::regenerate(false);      // regenerate but keep old data (rare)
+Session::regenerate();           // regenerate and invalidate the old session ID
+Session::regenerate(false);      // regenerate but keep the old session ID valid (rare)
 ```
 
 The auth extension calls `regenerate()` automatically on login.
@@ -50,9 +50,10 @@ Use on logout after clearing auth state. The auth extension handles this for you
 | `Session::has($key)` | `bool` | Return `true` if `$key` exists in the session. |
 | `Session::forget($key)` | `void` | Remove `$key` from the session. |
 | `Session::pull($key, $default)` | `mixed` | Return the value for `$key` and remove it. |
-| `Session::regenerate($deleteOld)` | `void` | Issue a new session ID. Deletes old data when `$deleteOld` is `true` (default). |
+| `Session::regenerate($deleteOld)` | `void` | Issue a new session ID. Invalidates the old session record when `$deleteOld` is `true` (default); current session data survives either setting. |
 | `Session::destroy()` | `void` | Clear all session data and delete the session. |
 | `Session::isStarted()` | `bool` | Return `true` if the session has been started. |
+| `Session::hasCookie()` | `bool` | Report a non-empty incoming session cookie without starting the session. This does not prove that stored session data exists. |
 
 ## Configuration
 
@@ -68,8 +69,15 @@ return [
         'secure'    => true,
         'http_only' => true,
         'same_site' => 'Lax',
+        'save_path' => '',
+        'cache_limiter' => 'nocache',
     ],
 ];
 ```
 
-See [Configuration](02-Configuration.md) and [Security](25-Security.md) for guidance on the `secure`, `http_only`, and `same_site` settings.
+`cache_limiter` accepts `nocache`, `private`, `private_no_expire`, or `''`. The default prevents a
+session-backed response from being stored by clients or shared caches. An empty value disables PHP's
+automatic headers; use it only when the application sets a safe `Cache-Control` header on every
+session-backed response. `public` is deliberately rejected.
+
+See [Configuration](02-Configuration.md) and [Security](25-Security.md) for deployment guidance.

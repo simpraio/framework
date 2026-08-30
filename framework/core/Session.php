@@ -55,4 +55,10 @@ final class Session
     {
         return self::$store->isStarted();
     }
+
+    /** Whether this request presented a non-empty session cookie, without starting one. */
+    public static function hasCookie(): bool
+    {
+        return self::$store->hasCookie();
+    }
 }

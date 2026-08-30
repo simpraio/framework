@@ -79,7 +79,13 @@ final class Kernel
             throw new HttpException(404);
         }
 
+        // Bootables run before controller autoload; route-scoped hooks wait until existence is known.
         $extensions = $this->container->extensions();
+
+        if (!$this->routeExists($route)) {
+            throw new HttpException(404);
+        }
+
         $response = $extensions->before($request, $route);
 
         if ($response === null) {
@@ -98,19 +104,28 @@ final class Kernel
         $response->send();
     }
 
+    private function routeExists(ResolvedRoute $route): bool
+    {
+        return class_exists($this->controllerClass($route))
+            || $this->container->view()->exists("{$route->module}/{$route->controller}");
+    }
+
+    private function controllerClass(ResolvedRoute $route): string
+    {
+        $base = str_replace(search: '-', replace: '', subject: ucwords($route->controller, separators: '-'));
+
+        return self::MODULES_NS . $route->module . '\\' . $base;
+    }
+
     private function dispatch(ResolvedRoute $route): Template|Response
     {
         $view = $this->container->view();
-        $base = str_replace(search: '-', replace: '', subject: ucwords($route->controller, separators: '-'));
-        $controllerClass = self::MODULES_NS . $route->module . '\\' . $base;
+        $controllerClass = $this->controllerClass($route);
         $templatePath = "{$route->module}/{$route->controller}";
         $hasController = class_exists($controllerClass);
         $hasTemplate = $view->exists($templatePath);
 
-        if (!$hasController && !$hasTemplate) {
-            throw new HttpException(404);
-        }
-
+        // run() has already established that at least one of the two exists.
         if ($hasController) {
             $instance = $this->makeController($controllerClass, $route);
             $template = $hasTemplate ? $view->load($templatePath) : new Template();

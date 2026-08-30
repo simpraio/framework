@@ -3,6 +3,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="color-scheme" content="light dark">
     <title>{PROJECT} | {TITLE}</title>
     <link rel="stylesheet" href="/assets/css/error.css">
 </head>
@@ -32,10 +34,6 @@
         <p>{ERROR}</p>
         <p>File: <code>{FILE}</code></p>
         <p>Line: <strong>{LINE}</strong></p>
-        {isSQL}
-        <pre class="trace">{SQL_QUERY}</pre>
-        <pre class="trace">{SQL_BINDS}</pre>
-        {-isSQL}
         <pre class="trace">{TRACE}</pre>
         {-isDebug}
     </div>

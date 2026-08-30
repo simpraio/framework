@@ -14,7 +14,7 @@ return [
 ];
 ```
 
-The token is validated on every `POST`, `PUT`, `PATCH`, and `DELETE` request. Requests without a valid token receive a `419` response.
+The token is validated on every `POST`, `PUT`, `PATCH`, and `DELETE` request backed by a controller or template. A missing route returns `404` before hooks run. Requests without a valid token receive a `419` response.
 
 ## Public API
 

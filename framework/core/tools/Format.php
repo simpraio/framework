@@ -79,12 +79,14 @@ final class Format
         return strtr($text, $replacements);
     }
 
-    public static function escape(mixed $value): string
+    public static function escape(mixed $value, bool $trim = true): string
     {
+        $string = (string)$value;
+
         return htmlspecialchars(
-            string: trim((string)$value),
+            string: $trim ? trim($string) : $string,
             flags: ENT_QUOTES | ENT_SUBSTITUTE,
-            encoding: 'UTF-8'
+            encoding: 'UTF-8',
         );
     }
 }

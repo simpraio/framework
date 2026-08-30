@@ -7,7 +7,7 @@ Extensions are discovered automatically from the `extensions/` directory. Each e
 ```
 Hook          // intercept requests before and after dispatch
 Contributor   // inject tokens and blocks into the layout template
-Bootable      // run one-time setup on every request
+Bootable      // run setup before controller or template lookup
 ```
 
 Extensions that implement none of these - utility-only extensions like `mail` or `validation` - do not need a `Boot.php` at all. The loader skips any extension folder without one. They are used directly in controllers as static facades or plain classes.
@@ -69,6 +69,8 @@ public function after(Request $request, Route $route, Response $response): void
 
 **`before()`** - returning a non-null `Response` skips all remaining hooks, the controller, and the layout. The first hook to return a Response wins; subsequent hooks do not run.
 
+Hooks run only for routes backed by a controller or template. A URL that maps to neither returns `404` before `before()` is called, so a hook cannot serve or redirect a nonexistent route.
+
 **`after()`** - always runs on every hook after the response is produced. The `$response` object is mutable - call `->header()`, `->cookie()`, or `->body()` to modify it in place. All hooks see the same instance.
 
 ```
@@ -108,13 +110,17 @@ return [
 
 ## Bootable
 
-Implementing `Bootable` adds a `boot()` method that runs once per request during extension initialisation, before any hooks or contributors.
+Implementing `Bootable` adds a `boot()` method that runs once after routing produces a valid candidate and before controller or template existence is checked.
 
 ```
 public function boot(): void
 ```
 
-Use it for one-time setup that must happen early: registering error handlers, initialising static facades, or wiring event listeners. The `error-log` extension uses it to attach an error handler callback; the `events` extension uses it to set up the global dispatcher.
+Use it for setup needed before controller autoload or hooks, such as initialising facades or listeners. The `error-log` extension attaches its optional database sink; the `events` extension initialises the dispatcher.
+
+Bootables run for valid route candidates, including candidates that ultimately return `404`. They do
+not run when Host validation fails or routing rejects a malformed or over-depth path before producing
+a candidate.
 
 ## Enabling & Disabling
 

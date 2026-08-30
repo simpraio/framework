@@ -18,6 +18,8 @@ return [
 ```
 
 The `error_log` database table is required for DB-backed error logging. Schema is in `tools/schema/error-log.sql`.
+Its `created_at` value comes from the database's UTC `CURRENT_TIMESTAMP(6)` default, so inserts
+and `NOW()`-based retention use the same clock. Convert to a display timezone only when presenting it.
 
 ## Public API
 
@@ -26,7 +28,7 @@ The `error_log` database table is required for DB-backed error logging. Schema i
 | `Logger::log($throwable, $config)` | `void` | Writes the exception to the `error_log` table. The `$config` argument is optional - omitting it reads from the extension config automatically. Internal sink failures fall back to `error_log()` to avoid masking the original exception. |
 | `Logger::purge($retentionDays)` | `void` | Deletes rows older than `$retentionDays`. Called automatically by the Boot hook once per day. |
 
-The Boot class implements `Bootable` and `Hook`. On boot, it registers a global error handler that calls `Logger::log()` for every unhandled exception. The `before()` hook triggers a daily purge via `Cache::once()`.
+The Boot class implements `Bootable` and `Hook`. On boot, it attaches `Logger::log()` as an additional sink to the core error handler. The sink covers unhandled exceptions after extension initialisation; primary file logging remains active independently. The `before()` hook triggers a daily purge via `Cache::once()`.
 
 ## Schema
 

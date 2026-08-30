@@ -64,6 +64,8 @@ templates/docs/start.html  ->  renders at /docs/start
 
 If a controller exists but returns a `Template` and no matching template file is found, the request returns `404`. Controllers that always return a `Response` (redirects, JSON, file downloads) do not need a template.
 
+A route that matches neither a controller nor a template is a `404` raised in `Kernel::run()`, **before** the extension hooks. Whether a page exists is not an access decision, so no extension is asked about it - see [Extensions](10-Extensions.md) for what that means when writing a `before()` hook.
+
 ## Language Prefix
 
 When `language.available` is a non-empty list in `config/app.php`, the router checks whether the first URL segment matches one of the available language codes. If it does, that segment is consumed as the language and excluded from module/controller resolution.

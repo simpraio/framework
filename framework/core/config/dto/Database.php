@@ -30,7 +30,6 @@ final readonly class Database implements JsonSerializable
         #[SensitiveParameter]
         public string $password,
         public string $charset,
-        public string $timezone,
         public array $options,
     ) {
     }
@@ -48,7 +47,6 @@ final readonly class Database implements JsonSerializable
             username: Cast::string($raw['username'] ?? null, 'database.username'),
             password: Cast::string($raw['password'] ?? null, 'database.password'),
             charset: Cast::string($raw['charset'] ?? null, 'database.charset', 'utf8mb4'),
-            timezone: Cast::trimmedString($raw['timezone'] ?? null, 'database.timezone', 'UTC'),
             options: $options,
         );
     }

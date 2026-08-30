@@ -62,6 +62,13 @@ server {
 
 Set deployment variables in the PHP-FPM pool config rather than the Nginx server block - Nginx does not forward `fastcgi_param` environment variables to PHP in all configurations. See [PHP-FPM Environment](#php-fpm-environment) below.
 
+## Infrastructure Request Limiting
+
+The optional `ratelimit` extension runs during application route hooks; missing routes do not reach it.
+It is not infrastructure-level DoS protection. Deployments whose threat model requires protection
+against arbitrary paths or volumetric traffic should configure it at their reverse proxy, CDN, WAF,
+or hosting provider. Limits and trusted-client-IP handling are deployment-specific.
+
 ## PHP-FPM Environment
 
 PHP-FPM clears environment variables by default (`clear_env = yes`). Set deployment variables explicitly in the pool config:
@@ -111,7 +118,10 @@ Both directories must be outside the web root - `cache/` and `logs/` are in the 
 The framework compiles `config/*.php`, the extension map, and the core class list into bundle files in the bundle directory (`cache/` by default). **These bundles are rebuilt only when missing - there is no staleness check against the source files.** After changing any config file, adding/removing/renaming an extension, or upgrading the framework, you MUST clear the bundle directory so it regenerates on the next request:
 
 ```
-rm -f cache/*.php        # or: php tests/clear_cache.php
+rm -f cache/*.php
 ```
+
+`tools/clear-cache.php` clears application cache and APCu entries; it does not remove compiled
+bundle files and therefore does not replace this deployment step.
 
 If you deploy new code over a populated bundle directory without clearing it, the previously compiled config keeps being served - silently, with no error. A renamed config section, a newly disabled extension, or a new security setting is ignored, and the affected config DTOs fall back to their code defaults. Because several extensions default to `enabled = true` in code (the shipped config files disable them), a stale bundle can **silently re-enable an extension you intended to keep off**. Make clearing the bundle directory a mandatory step in your deploy pipeline: run it after the new code is in place and before the first request is served.

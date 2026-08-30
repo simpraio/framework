@@ -19,6 +19,12 @@ final class State
             return self::guest();
         }
 
+        // A request with neither a started session nor a session cookie is necessarily a guest;
+        // avoid creating session state merely to confirm that.
+        if (!Session::isStarted() && !Session::hasCookie()) {
+            return self::guest();
+        }
+
         /** @var mixed $data */
         $data = Session::get($key);
         if (!is_array($data) || $data === []) {
@@ -94,9 +100,8 @@ final class State
             return null;
         }
 
-        // A session created before fingerprints existed carries none, so it is upgraded in
-        // place rather than destroyed. Refreshing group_id here also lets a group change take
-        // effect on the next revalidation instead of only on the next login.
+        // Adopt a missing fingerprint on first revalidation and refresh group membership at the
+        // same boundary.
         $data['group_id'] = (int)($row['group_id'] ?? Groups::guestId());
         $data['credential_fingerprint'] = $fingerprint;
         $data['last_validated_at'] = $now;

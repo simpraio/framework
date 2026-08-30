@@ -69,8 +69,15 @@ Defined in `config/session.php`:
     'http_only' => true,   // no JavaScript access
     'same_site' => 'Lax',  // 'Strict', 'Lax', or 'None'
     'save_path' => '',     // empty = PHP default (/tmp or session.save_path)
+    'cache_limiter' => 'nocache', // safe default for session-backed responses
 ],
 ```
+
+`cache_limiter` controls the automatic cache headers PHP sends when a session starts. Use `nocache`
+(the default), `private`, `private_no_expire`, or `''`. An empty value disables PHP's automatic
+headers and is safe only when the application sets an appropriate `Cache-Control` header on every
+session-backed response. `public` is rejected because it could expose per-user responses through a
+shared cache.
 
 ## Log Settings
 
@@ -116,6 +123,19 @@ Equivalently, in `config/framework.local.php`:
     'password' => 'secret',
 ],
 ```
+
+MySQL connection sessions are always pinned to `+00:00`, so database defaults such as
+`CURRENT_TIMESTAMP(6)` store UTC. This is deliberately not configurable. `project.timezone`
+controls user-facing display and input, not storage.
+
+The framework reserves the MySQL init-command PDO option to establish UTC before the first
+statement. Do not set `PDO::MYSQL_ATTR_INIT_COMMAND` or `Pdo\\Mysql::ATTR_INIT_COMMAND`; a
+connection carrying an application value for it is refused rather than silently overwritten.
+Execute any additional session setup explicitly after connecting.
+
+`database.options` is currently limited to string keys, so PDO attribute constants (which are
+integers) set there never reach the driver. Do not rely on it for connection options such as TLS
+settings.
 
 ## Extension Config
 

@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [5.0.0] - 2026-08-30
+
+### Added
+
+- `session.cache_limiter` (default `nocache`), so the cache headers PHP stamps on any response that started a session are a stated setting rather than whatever `php.ini` happened to hold. Supported values are `nocache`, `private`, `private_no_expire`, and `''`; `public` is rejected because it would make every session-backed response eligible for storage by shared caches. Set `''` only when the application sets a safe `Cache-Control` header on every such response.
+- `Session::hasCookie()`, which reports whether the request presented a non-empty session cookie without starting one. It deliberately does not claim that the identifier maps to stored session data.
+- `tools/schema/migration-utc-storage.sql`, which converts the framework tables' locally stored instant columns to UTC for projects adopting the change below. Run it only in a maintenance window, after setting the previous storage timezone and verifying named-zone support when needed. A value whose conversion cannot be resolved - an unloaded named zone, or a stored date `CONVERT_TZ` cannot read - is left as it stands rather than written as `NULL`, and the script ends by reporting how many rows each table skipped. Values in a DST transition window cannot be detected that way, because `CONVERT_TZ` resolves both the repeated and the nonexistent hour to a deterministic instant; the script instead reads the zone's transition history and, before converting anything, records those rows and their original local values in a `simpra_dst_review` table, because they are indistinguishable once converted. It also records itself in a `simpra_migration` table, so a second run cannot shift the data twice.
+- `tools/verify-vendored.php`, which compares a project's flattened framework copy against this checkout using each repository's Git filters.
+- A shared, discovered test layout under `tests/core/`, `tests/extensions/`, and `tests/integration/`.
+- `Format::escape()` takes a `trim` argument, defaulting to the trimming it already applied. Template token escaping and the error-page fallback now go through it instead of calling `htmlspecialchars()` directly, so the framework escapes output in one place. The flags and encoding stay fixed at `ENT_QUOTES | ENT_SUBSTITUTE` and UTF-8 so no caller can weaken them.
+
+### Changed
+
+- **Breaking:** MySQL connection sessions are pinned to `+00:00` instead of following `project.timezone`. One setting previously answered two unrelated questions - what humans read, and how instants are stored - so `DEFAULT CURRENT_TIMESTAMP(6)` columns held local wall clock. **Stop every database writer, deploy 5.0.0, convert existing instant columns with `tools/schema/migration-utc-storage.sql`, and only then resume writes.** Any other order can mix local and UTC rows. `Database::fromArray()` now takes only the raw config array instead of a second project-timezone argument, and the database DTO no longer exposes a timezone property; database storage timezone is deliberately not configurable.
+- The MySQL init-command PDO option is reserved by the framework: it carries the UTC pin, and a connection built with an application value for it is refused rather than silently overwritten. Run any additional session setup explicitly after connecting. Note that `database.options` only ever reaches the connection with string keys, so a PDO attribute constant set there was already being dropped before this release; that is a separate gap and is not fixed here.
+- `Auth::login()` writes `last_login_at` with `UTC_TIMESTAMP(6)`, matching the new storage contract. The v5 migration converts existing values because v4 wrote them through the project-timezone formatter.
+- The error-log extension no longer stamps `created_at` from PHP. It used the display formatter while purging compared against the database clock, so the two agreed only while both were in the same zone; the column's own default now writes it.
+- Error pages send `robots: noindex, nofollow`, so a crawled 500 cannot compete in search results with the page that was meant to load, and declare `color-scheme: light dark` in the markup as well as in `error.css` - the stylesheet failing to load is exactly the case this page must survive.
+- The template-free fallback error page uses the configured project name and links home instead of hardcoding the Simpra wordmark, so products do not need to patch vendored core for fallback branding.
+- Generic suites are discovered instead of listed, can run from either the framework checkout or a flattened project, and report unmet database prerequisites as skips instead of false passes. Benchmarks moved to `tools/bench/`, the cache helper moved to `tools/clear-cache.php`, and the former top-level battery is now `tests/integration/battery.php`.
+- The deployment security probe accepts `--csrf-path`, never follows redirects, and reports an off-origin redirect for a missing route as a warning rather than mistaking it for proof that the route was safely rejected.
+
+### Fixed
+
+- Routes that map to neither a controller nor a template now return `404` before route-scoped extension hooks run. This prevents deny-by-default authentication from redirecting nonexistent URLs to sign-in. Because the application rate limiter is a route hook, missing routes no longer reach it; see UPGRADING for the behavior change.
+- Anonymous visitors are no longer issued a session by mistake. Session start is lazy by design, but the auth extension's contributor hook runs on every rendered page and read the session — and reading one starts it — so every first-time visitor and every crawler was handed a cookie and a session file, and the page went out with `Cache-Control: no-store`, uncacheable by any shared cache. The hook now resolves a request carrying no session cookie as a guest without touching the session; logging in, flash messages and CSRF tokens still start one on demand.
+- Removed the error page's dead SQL error-detail scaffolding. `isSQL` was hardwired to `false` and the `SQL_QUERY`/`SQL_BINDS` tokens to `''` from the day they were added, so the error page never printed any SQL and the block never rendered — it was never a working feature. If your own `templates/error.html` still contains the `{isSQL}...{-isSQL}` block, delete it when upgrading: `Template::blocks()` only rewrites the names it is given, so the leftover markers would otherwise render literally on the error page.
+
 ## [4.0.0] - 2026-07-26
 
 ### Added

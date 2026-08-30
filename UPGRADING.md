@@ -61,6 +61,158 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 4.0.0 -> 5.0.0
+
+**Impact:** a maintenance window and data migration are required if the database contains
+instant-valued `DATETIME` columns. Framework tables switch from local wall clock to UTC,
+so existing rows must be converted before any v5 writer is allowed to run.
+
+### Required
+
+1. Back up the database and identify the timezone used by the previous
+   `project.timezone`. For a named zone, verify that MySQL's timezone tables are loaded:
+
+   ```sql
+   SELECT CONVERT_TZ('2026-01-15 12:00:00', 'Europe/Prague', '+00:00');
+   ```
+
+   A `NULL` result means the named zone is unavailable; load the timezone tables before
+   migrating. Use a fixed offset only for a timezone whose offset never changes.
+
+2. Convert existing instant data in a write-free maintenance window, **in this order**:
+
+   ```sh
+   # 1. stop web workers, queue workers, cron jobs, and every other database writer
+   # 2. deploy the v5 code while writers remain stopped
+   # 3. pass the previous project.timezone to the same client session, then run:
+   mariadb --init-command="SET @from_timezone = 'Europe/Prague'" \
+     <database> < tools/schema/migration-utc-storage.sql
+   ```
+
+   Writers stay stopped until step 6. On MySQL substitute `mysql` for `mariadb`.
+
+   Replace `Europe/Prague` with the previous storage timezone. The script defaults to
+   `+00:00` when `@from_timezone` is not supplied, which is a no-op for projects that already stored
+   UTC. It covers `auth_group.created_at`, `auth_user.created_at`,
+   `auth_user.updated_at`, nullable `auth_user.last_login_at`, and
+   `error_log.created_at`. The v4 login path formatted `last_login_at` in
+   `project.timezone`, so it must be converted too.
+
+   The supplied script expects both the auth and error-log schemas. Remove the statements
+   for an extension whose tables are not installed. Run it through a client that stops at
+   the first error, as the command above does; one that continues past an error or commits
+   each statement can convert some tables and leave others local.
+
+   Use an account that may `UPDATE` the framework tables, `CREATE`, `INSERT` into and `DELETE` from
+   the three bookkeeping tables (`simpra_migration`, `simpra_dst_window`, `simpra_dst_review`), and
+   `SELECT` from `mysql.time_zone_*`, which the DST pre-flight reads. The application's own
+   least-privilege account is generally not the right one.
+
+   Shifting the data twice would corrupt it, so the script records itself in a
+   `simpra_migration` ledger table and a second run aborts on the duplicate key before
+   touching a row. Only a run that actually converts is recorded, so a no-op run does not
+   block the real one later. To re-run deliberately, restore the backup.
+
+   A named zone applies the offset each value actually had, which a fixed offset cannot: for
+   `Europe/Prague`, a June value shifts by two hours and a January value by one. Load
+   `mysql.time_zone_*` first (`mariadb-tzinfo-to-sql /usr/share/zoneinfo | mariadb mysql`) —
+   without them `CONVERT_TZ` returns `NULL` for every row.
+
+   The two DST edge cases cannot be skipped: `CONVERT_TZ` resolves both to a deterministic
+   instant, so a wall clock in the nonexistent spring-forward hour lands on the transition
+   boundary and one in the repeated fall-back hour is read as the first (pre-transition)
+   pass. Both are guesses about data that never recorded which side it was on. Before
+   converting anything, the script records every affected row — with its original local value —
+   into a `simpra_dst_review` table, derived from the zone's real transition history. That table
+   is the reconciliation work list, and it has to be captured before the conversion because the
+   rows are indistinguishable afterwards. The console prints totals and the first 50 rows as a
+   preview; read the complete list with:
+
+   ```sql
+   SELECT * FROM simpra_dst_review ORDER BY table_name, stored_local_value;
+   ```
+
+   Drop `simpra_dst_review` and `simpra_dst_window` once reconciliation is finished. Keep
+   `simpra_migration` — it is the record that this migration ran.
+
+   **Long-lived v4 writers corrupt the assumption this conversion rests on.** v4 computed a
+   single numeric offset from `project.timezone` when the connection opened and kept it for
+   that connection's life, so a writer that stayed connected across a DST transition went on
+   stamping rows at the pre-transition offset. Those rows hold a wall clock that never
+   existed locally, and this migration converts them with the offset the named zone says
+   applied at that moment — moving them by a further hour. Persistent PDO connections, queue
+   workers, cron daemons and long-running CLI processes are the usual carriers. Identify
+   every v4 writer that outlived a DST boundary and reconcile the records it wrote after each
+   boundary against audit logs or another UTC source; the migration cannot detect them and
+   the report will not list them.
+
+3. Read the skipped-row report the script prints last. Every count must be zero. A row whose
+   conversion cannot be resolved is left as it was rather than written as `NULL`, so nothing
+   is destroyed, but nothing is converted either:
+
+   - a table-wide count means the named zone did not resolve at all. Nothing was changed and
+     the migration was not recorded, so load `mysql.time_zone_*` and run the file again.
+   - a handful of rows means those rows hold a date `CONVERT_TZ` cannot read, such as a
+     legacy `0000-00-00`. Fix or delete them and convert them by hand.
+
+4. Apply the same conversion to your own instant columns written under the old connection
+   timezone, including columns with `DEFAULT CURRENT_TIMESTAMP`.
+   One exception: a daily-rollup `day` column is a calendar label, not an instant, and
+   belongs in the reporting zone. Do not convert it as an instant: shifting a 22:00 local
+   event to UTC can place it in the next day's bucket.
+
+5. Clear the bundle cache:
+
+   ```sh
+   rm -f cache/*.php
+   ```
+
+   A bundle is rebuilt only when missing, with no staleness check, so a surviving one keeps serving
+   the previous release's compiled config — including silently re-enabling an extension the shipped
+   config disables.
+
+6. Only now resume writers and traffic. Everything above happens with every writer stopped: a v5
+   writer running before step 4 stamps UTC into product tables that are still local.
+
+### Conditional
+
+1. If your own `templates/error.html` still contains `{isSQL}...{-isSQL}`, delete that
+   block. The error page no longer supplies `isSQL`, `SQL_QUERY` or `SQL_BINDS`, and
+   unhandled block markers render literally rather than being stripped.
+2. If application code calls `Database::fromArray($raw, $timezone)` directly, remove the
+   second argument. Database sessions are always UTC and the DTO no longer has a timezone
+   property.
+3. If any code builds a database connection with `PDO::MYSQL_ATTR_INIT_COMMAND` or
+   `Pdo\\Mysql::ATTR_INIT_COMMAND`, remove it. The framework reserves that connection option
+   for `SET time_zone = '+00:00'` and refuses a connection carrying an application value
+   rather than silently overwriting it. Run additional session statements explicitly after
+   connecting instead. (`database.options` only passes string keys through, so a PDO
+   attribute constant set there was already being dropped before v5.)
+4. If a `before()` hook redirects a URL after its controller and template were removed, replace
+   it with a small controller returning `Response::redirect()` or a deployment-level redirect.
+   Missing routes now return `404` before route hooks run, so they no longer reach the `ratelimit`
+   extension. Use deployment infrastructure for broader traffic protection when your risk profile
+   requires it.
+5. Update scripts or CI jobs that call paths moved in v5:
+
+   ```text
+   tests/battery.php       -> tests/integration/battery.php
+   tests/clear_cache.php   -> tools/clear-cache.php
+   tests/bench/*           -> tools/bench/*
+   ```
+
+### Good to know
+
+- A URL that maps to neither a controller nor a template now returns `404` before route hooks.
+  This fixes deny-by-default authentication redirecting mistyped URLs to sign-in.
+- `project.timezone` still controls what humans read. Database storage is always UTC and is
+  not configurable.
+- Error pages now send `robots: noindex, nofollow`.
+- Anonymous requests no longer start a session unless application code, a flash message,
+  CSRF, or another feature actually uses session state.
+- The framework security probe can test a public form route with `--csrf-path=/login` and
+  does not follow redirects while evaluating protected or missing routes.
+
 ## 3.0.0 -> 4.0.0
 
 **Impact:** config check required before deploying. Configuration is now validated

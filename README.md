@@ -29,12 +29,15 @@ A basic page does not require a database.
 ```sh
 git clone https://github.com/simpraio/framework my-project
 cd my-project
-php -S 127.0.0.1:8000 -t public
+php -S 127.0.0.1:8000 -t framework/public
 ```
 
 Open `http://127.0.0.1:8000`.
 
-The web server document root must be `public`, never the project root.
+The repository keeps its distributable application under `framework/`. When those contents are
+copied into a project root, use `php -S 127.0.0.1:8000 -t public` instead. The web server document
+root must always be the applicable `public/` directory, never the checkout or project root. See
+[Getting Started](docs/01-Getting-started.md) for the flattened project setup.
 
 ## Local Configuration
 

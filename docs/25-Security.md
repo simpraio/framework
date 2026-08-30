@@ -48,6 +48,11 @@ The `ratelimit` extension enforces a per-IP request cap. It is **disabled by def
 
 Exceeding the limit returns `429 Too Many Requests`. The counter is per-IP, fixed-window, stored in APCu - **APCu must be enabled** for this extension to function.
 
+The extension runs as a route hook, so missing routes do not reach it and an earlier hook can
+short-circuit it. It is application-level abuse control, not infrastructure-level DoS protection. If
+your deployment needs protection against arbitrary-path or volumetric traffic, configure it at the
+reverse proxy, CDN, WAF, or hosting provider.
+
 ## Session Security
 
 Session defaults are secure out of the box. The defaults live in `config/session.php`:
@@ -59,10 +64,18 @@ Session defaults are secure out of the box. The defaults live in `config/session
     'secure'    => true,     // HTTPS only
     'http_only' => true,     // no JavaScript access
     'same_site' => 'Lax',    // 'Strict', 'Lax', or 'None'
+    'cache_limiter' => 'nocache', // session-backed responses are not cacheable
 ],
 ```
 
 Additionally, the session layer sets `session.use_strict_mode = 1` (rejects uninitialized session IDs) and `session.use_only_cookies = 1` (session ID never in the URL).
+
+PHP sends cache headers when a session starts. Keep `cache_limiter` at `nocache` unless the application
+has an explicit caching policy for every session-backed response. `private` and `private_no_expire`
+allow browser caching but not shared-proxy caching. `''` disables PHP's automatic headers and transfers
+the entire responsibility to the application. `public` is rejected because an authenticated response
+or a page containing a CSRF token must never become shared-cache eligible merely because of session
+configuration.
 
 ## Error Exposure
 
@@ -104,9 +117,11 @@ The client follows up to five HTTP redirects manually instead of using cURL's au
 
 - Set `debug: false` - hides stack traces and internal paths from error responses.
 - Set `allowed_hosts` - prevents host header injection; leave empty only during development.
+- If your threat model requires arbitrary-path or volumetric traffic protection, configure it outside PHP at the reverse proxy, CDN, WAF, or hosting provider.
 - Serve only the `public/` directory from the web root - the project root must never be publicly accessible.
 - Keep secrets (database passwords, API keys) out of committed config files - use environment variables or a local config override.
 - Keep `session.secure: true` - the shipped `config/session.php` sets it, but deleting the key falls back to `false`, which lets the session cookie travel over plain HTTP. Treat a missing `session.secure` as a configuration error, not a default.
+- Keep `session.cache_limiter: nocache` unless every session-backed response receives an application-owned, reviewed `Cache-Control` policy.
 - Enable the `csrf` extension and add `{_csrf}` to every unsafe form.
 - Enable the `security` extension (on by default) and review the CSP policy for your specific assets and third-party origins.
 - Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, auth access, auth group, and error-log purge caches. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.

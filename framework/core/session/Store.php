@@ -25,6 +25,9 @@ final class Store
         ini_set(option: 'session.use_strict_mode', value: '1');
         ini_set(option: 'session.use_only_cookies', value: '1');
 
+        // Must be set before the session starts: PHP stamps these headers at start time.
+        session_cache_limiter($this->config->cacheLimiter);
+
         if ($this->config->savePath !== '') {
             $path = $this->config->savePath;
             if (!is_dir($path) && !mkdir(directory: $path, permissions: 0o700, recursive: true) && !is_dir($path)) {
@@ -116,6 +119,17 @@ final class Store
     public function isStarted(): bool
     {
         return $this->started || session_status() === PHP_SESSION_ACTIVE;
+    }
+
+    /** Whether this request presented a non-empty session cookie, without starting one. */
+    public function hasCookie(): bool
+    {
+        // The configured name, not session_name(): configure() does not run on CLI, so the
+        // runtime name can still be PHP's default while the cookie carries the configured one.
+        /** @var mixed $cookie */
+        $cookie = $_COOKIE[$this->config->name] ?? null;
+
+        return is_string($cookie) && $cookie !== '';
     }
 
     private function ensureStarted(): void

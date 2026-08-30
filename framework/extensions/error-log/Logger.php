@@ -19,10 +19,8 @@ final class Logger
         $config ??= Config::enabled();
 
         try {
-            // created_at is left to the column DEFAULT so the row and the purge below share ONE
-            // clock (the DB session, which the framework pins to database.timezone). Stamping it
-            // here with Format::datetime() wrote the DISPLAY timezone, which the purge's NOW()
-            // never matched once the two zones differed.
+            // Let the UTC database default stamp created_at so inserts and NOW()-based purges use
+            // the same clock.
             Db::insert('error_log', [
                 'exception' => self::truncate($e::class, 191),
                 'message' => self::truncate($e->getMessage(), 65_535),

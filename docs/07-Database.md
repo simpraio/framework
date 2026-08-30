@@ -34,8 +34,8 @@ $email = Db::value('users', 'email', ['id' => $id]);
 $names = Db::values('users', 'id', 'name');
 $names = Db::values('users', 'id', 'name', ['active' => 1]);
 
-// Insert a row - returns affected row count (1 on success)
-Db::insert('log', ['user_id' => $id, 'action' => 'login', 'created_at' => date('Y-m-d H:i:s')]);
+// Insert a row - created_at is left to its DEFAULT CURRENT_TIMESTAMP(6)
+Db::insert('log', ['user_id' => $id, 'action' => 'login']);
 
 // Replace (INSERT ... ON DUPLICATE KEY equivalent in MySQL)
 Db::replace('settings', ['key' => 'theme', 'value' => 'dark']);
@@ -70,9 +70,27 @@ Db::values('users', 'id', 'name', ['id' => [1, 2, 3]]); // id IN (1, 2, 3)
 ## Last insert ID
 
 ```php
-Db::insert('users', ['email' => $email, 'created_at' => date('Y-m-d H:i:s')]);
+Db::insert('users', ['email' => $email]);
 $newId = Db::lastInsertId();
 ```
+
+## UTC datetime storage
+
+MySQL connection sessions are pinned to `+00:00`; database defaults such as
+`CURRENT_TIMESTAMP(6)` therefore write UTC. Keep instant columns as `DATETIME(6)` and prefer
+their database defaults instead of stamping them with PHP's `date()`, which uses
+`project.timezone` after the framework boots.
+
+A `DATETIME` string carries no timezone metadata. Interpret a retrieved instant as UTC before
+converting it to the display timezone:
+
+```php
+$stored = new DateTimeImmutable($row['created_at'], new DateTimeZone('UTC'));
+$display = $stored->setTimezone(new DateTimeZone(Config::project()->timezone));
+```
+
+Calendar labels such as a reporting day are not instants. Store those in the business timezone
+required by the report instead of applying the UTC-instant rule blindly.
 
 ## Transactions
 
@@ -128,4 +146,4 @@ $ran = Db::lock('invoice.generate.' . $invoiceId, timeout: 5, callback: function
 
 ## Configuration
 
-Database credentials are set via environment variables or `config/framework.local.php` - never in version-controlled config files. See [Configuration](02-Configuration.md) for the full list of `SIMPRA_DB_*` environment variables and the local config format.
+Database credentials are set via environment variables or `config/framework.local.php` - never in version-controlled config files. MySQL sessions are always UTC; `project.timezone` is only for user-facing input and display. See [Configuration](02-Configuration.md) for the full list of `SIMPRA_DB_*` environment variables and the local config format.

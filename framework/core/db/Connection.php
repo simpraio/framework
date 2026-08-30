@@ -7,8 +7,6 @@ namespace core\db;
 use Closure;
 use core\config\dto\Database;
 use core\Instance;
-use DateTimeImmutable;
-use DateTimeZone;
 use PDO;
 use PDOStatement;
 use RuntimeException;
@@ -190,6 +188,7 @@ final class Connection
         $defaults = [
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ];
+        $initCommandAttr = null;
 
         if ($this->config->driver === 'mysql') {
             // Report matched rows (not just changed rows) from UPDATE rowCount(), so
@@ -199,17 +198,25 @@ final class Connection
                 : PDO::MYSQL_ATTR_FOUND_ROWS;
             $defaults[$foundRowsAttr] = true;
 
-            if ($this->config->timezone !== '') {
-                $initCommandAttr = defined('Pdo\\Mysql::ATTR_INIT_COMMAND')
-                    ? (int)constant('Pdo\\Mysql::ATTR_INIT_COMMAND')
-                    : PDO::MYSQL_ATTR_INIT_COMMAND;
-                $defaults[$initCommandAttr] =
-                    "SET time_zone = '" . self::tzOffset($this->config->timezone) . "'";
-            }
+            $initCommandAttr = defined('Pdo\\Mysql::ATTR_INIT_COMMAND')
+                ? (int)constant('Pdo\\Mysql::ATTR_INIT_COMMAND')
+                : PDO::MYSQL_ATTR_INIT_COMMAND;
         }
 
         /** @var array<int, mixed> $options */
         $options = $this->config->options + $defaults;
+        if ($initCommandAttr !== null) {
+            // UTC storage owns the init command. Reject an application value instead of silently
+            // discarding its session setup; run additional session statements after connecting.
+            if (array_key_exists($initCommandAttr, $this->config->options)) {
+                throw new RuntimeException(
+                    'Config: database.options must not set the MySQL init command; it is reserved for '
+                    . "pinning the session to UTC (SET time_zone = '+00:00').",
+                );
+            }
+
+            $options[$initCommandAttr] = "SET time_zone = '+00:00'";
+        }
         $options[PDO::ATTR_ERRMODE] = PDO::ERRMODE_EXCEPTION;
         $options[PDO::ATTR_EMULATE_PREPARES] = false;
 
@@ -219,11 +226,6 @@ final class Connection
             password: $this->needsAuth() ? $this->config->password : null,
             options: $options,
         );
-    }
-
-    private static function tzOffset(string $timezone): string
-    {
-        return new DateTimeImmutable('now', new DateTimeZone($timezone))->format('P');
     }
 
     private function dsn(): string

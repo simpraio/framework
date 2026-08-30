@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace core;
 
+use core\tools\Format;
+
 final class Template
 {
     public function __construct(private string $content = '')
@@ -28,7 +30,7 @@ final class Template
             $replace[] = str_replace(
                 search: ['{', '}'],
                 replace: ['&#123;', '&#125;'],
-                subject: htmlspecialchars($value, flags: ENT_QUOTES | ENT_SUBSTITUTE, encoding: 'UTF-8'),
+                subject: Format::escape($value, trim: false),
             );
         }
         $this->content = str_replace($search, $replace, $this->content);

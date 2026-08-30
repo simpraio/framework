@@ -23,6 +23,7 @@ final readonly class Session
         public bool $httpOnly,
         public string $sameSite,
         public string $savePath,
+        public string $cacheLimiter = 'nocache',
     ) {
     }
 
@@ -40,6 +41,17 @@ final readonly class Session
             // silently weakening the cookie, so reject it at boot instead.
             sameSite: Cast::oneOf($raw['same_site'] ?? null, 'session.same_site', ['Lax', 'Strict', 'None'], 'Lax'),
             savePath: Cast::string($raw['save_path'] ?? null, 'session.save_path'),
+            // Starting a session makes PHP stamp cache headers on the response. 'nocache' is
+            // kept as the default because it is what stops a shared proxy storing a per-user
+            // page; '' sends none and hands that decision to the application. 'public' is
+            // deliberately rejected because it would make every session-backed response
+            // eligible for storage by shared caches.
+            cacheLimiter: Cast::oneOf(
+                $raw['cache_limiter'] ?? null,
+                'session.cache_limiter',
+                ['nocache', 'private', 'private_no_expire', ''],
+                'nocache',
+            ),
         );
     }
 }

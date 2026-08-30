@@ -25,6 +25,10 @@ return [
 
 The `auth_group`, `auth_user`, and `auth_access` database tables are required once auth is enabled. Schemas are in `tools/schema/auth.sql`.
 
+`created_at`, `updated_at`, and `last_login_at` represent instants and are stored as UTC
+`DATETIME(6)` values. Convert them to the user's display timezone only after reading. Projects
+upgrading from v4 must convert existing values as described in [UPGRADING.md](../UPGRADING.md).
+
 ## Session lifetime and throttling
 
 Every `revalidate_interval` seconds a request re-checks the session against `auth_user` and destroys it unless the account is still `active` and still holds the credential it logged in with. Practical consequences:

@@ -177,8 +177,9 @@ Keep `framework.local.php` small. Full extension settings belong in `config/*.ph
 
 - Database use is optional.
 - DB-backed extensions should be disabled unless needed.
-- PHP and database must use the configured application timezone.
-- Database connections must set timezone immediately after connect.
+- PHP uses the configured application timezone for display and input only.
+- Database sessions are pinned to UTC by the framework and are not configurable. Never set the MySQL
+  init command through `database.options`; the framework reserves it for that pin.
 - Timestamp columns should use `DATETIME(6)`.
 - Automatic DB timestamps should use microsecond precision.
 - PHP date/time values should use `DateTimeImmutable`.

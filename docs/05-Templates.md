@@ -18,7 +18,7 @@ Token names are case-sensitive. Convention is `UPPER_SNAKE_CASE` for tokens and 
 
 ## Tokens
 
-`tokens()` replaces `{KEY}` placeholders with HTML-escaped values. Every value goes through `htmlspecialchars(ENT_QUOTES | ENT_SUBSTITUTE, UTF-8)`, and any `{` or `}` in the value are replaced with `{` and `}`. This means a user-supplied value can never form a new token or block marker in the output.
+`tokens()` replaces `{KEY}` placeholders with HTML-escaped values. Every value goes through `htmlspecialchars(ENT_QUOTES | ENT_SUBSTITUTE, UTF-8)`, and any `{` or `}` in the value is encoded as the numeric entity `&#123;` or `&#125;`, which browsers render back as `{` and `}`. This means a user-supplied value can never form a new token or block marker in the output.
 
 ```
 $template->tokens([
