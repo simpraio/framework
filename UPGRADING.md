@@ -63,11 +63,12 @@ and smoke-test staging with `project.debug = false`.
 
 ## 5.0.0 -> 5.1.0
 
-**Impact:** PHP `mbstring` is now an explicit framework requirement, and three behaviours
-tighten: boot fails when a proxy is configured while the egress guard is enforcing addresses,
-outbound calls to addresses that are not globally routable are refused, and mail subjects and
-header values are held to printable ASCII and tab. There are no configuration or schema
-changes, but read the Conditional steps before deploying.
+**Impact:** PHP `mbstring` is now an explicit framework requirement, and four behaviours
+change: boot fails when a proxy is configured while the egress guard is enforcing addresses,
+outbound calls to addresses that are not globally routable are refused, mail subjects and
+header values are held to printable ASCII and tab, and an auth redirect configured with a
+leading slash loses its trailing slash. There are no configuration or schema changes, but
+read the Conditional steps before deploying.
 
 ### Required
 
@@ -129,6 +130,17 @@ changes, but read the Conditional steps before deploying.
    `block_private_ips: false` to record that the proxy owns that policy, or drop the proxy. A
    disabled egress guard is unaffected, since `block_private_ips` does nothing there.
 
+8. If `extensions.auth`'s `guest_route`, `denied_redirect` or `logout_redirect` is configured
+   with a leading slash, its redirect target loses the trailing slash: `'/login'` sent a guest
+   to `/login/` before and sends them to `/login` now. Both forms reach the same controller,
+   because the router strips trailing slashes, so nothing 404s - but the URL your users and
+   logs see changes, and a rewrite that canonicalizes to the trailing-slash form will now add
+   a redirect rather than remove one. Write `'/login/'`, or the bare `'login'`, to keep the
+   previous target. A value written as a bare name is unaffected.
+9. If you call `Auth::logout($route)` with a route argument, it follows the same rule now.
+   `Auth::logout('/bye')` redirected to `/bye/` before and redirects to `/bye` now; pass
+   `'/bye/'` or `'bye'` to keep the previous target.
+
 ### Good to know
 
 The egress guard hands the addresses it validated to cURL as `CURLOPT_RESOLVE`, so the name is
@@ -142,6 +154,12 @@ environment cannot route outbound requests without the configuration saying so.
 Long subjects are encoded into bounded RFC 2047 encoded-words, attachment filenames use
 RFC 2231 continuations, recipient lists fold between addresses, and long display names are
 encoded. Short ASCII subjects are unchanged.
+
+For the auth redirects, the leading slash is the difference: `'login'` still becomes `/login/`,
+`'/login'` becomes `/login`. If your canonical URLs carry no trailing slash, adding the slash to
+the configured value removes one redirect from every protected page. Leading slashes and
+backslashes collapse, so a configured value can only name a path on this site: `'//host'` and
+`'/\host'` both become `/host`.
 
 ## 4.0.0 -> 5.0.0
 

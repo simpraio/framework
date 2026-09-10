@@ -23,6 +23,30 @@ return [
 ];
 ```
 
+### Redirect paths
+
+`guest_route`, `denied_redirect` and `logout_redirect` accept either form, and the leading
+slash is the difference:
+
+| configured | redirects to |
+| --- | --- |
+| `'login'` | `/login/` |
+| `'/login'` | `/login` |
+| `'/login/'` | `/login/` |
+| `''` | `/` |
+
+A bare name is a route name and takes the `/name/` shape. A value that starts with a slash is
+the path exactly as written, which is what a site whose canonical URLs carry no trailing slash
+needs: configured as `'login'`, a guest is sent to `/login/` and the site's own rewrite then
+sends them to `/login`, so every protected page costs two redirects instead of one.
+
+The same rule applies to a route passed at the call site, so `Auth::logout('/bye')` redirects
+to `/bye` and `Auth::logout('bye')` to `/bye/`.
+
+Leading slashes and backslashes collapse, so a value can only ever name a path on this site:
+`'//host'` and `'/\host'` both become `/host`. A browser reads a backslash in a URL as a
+slash, so both would otherwise be protocol-relative URLs naming another origin.
+
 The `auth_group`, `auth_user`, and `auth_access` database tables are required once auth is enabled. Schemas are in `tools/schema/auth.sql`.
 
 `created_at`, `updated_at`, and `last_login_at` represent instants and are stored as UTC

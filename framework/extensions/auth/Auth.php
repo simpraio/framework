@@ -81,11 +81,7 @@ final class Auth
         Session::destroy();
         User::set(['user_id' => 0, 'group_id' => 0]);
 
-        $path = $config->logoutRedirect;
-        if ($route !== null) {
-            $r = trim(string: $route, characters: '/');
-            $path = $r !== '' ? '/' . $r . '/' : '/';
-        }
+        $path = $route !== null ? Config::redirectPath($route) : $config->logoutRedirect;
 
         return Response::redirect($path);
     }
