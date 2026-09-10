@@ -60,8 +60,26 @@ final readonly class Config
             );
         }
 
+        $enabled = Cast::bool($raw['enabled'] ?? null, 'extensions.http-client.enabled', true);
+        $egress = Egress::fromArray(Map::section($raw, 'egress'));
+
+        // A proxy resolves the destination itself, so the addresses this application validated are
+        // never the ones dialled, and CURLOPT_RESOLVE does not reach proxy-side resolution. Leaving
+        // both on would advertise an SSRF address guarantee that cannot hold. Only when the guard
+        // is enabled, and the client itself is: an extension that does not run enforces nothing,
+        // so demanding a setting there would change nothing.
+        if ($enabled && $proxy !== null && $egress->enabled && $egress->blockPrivateIps) {
+            throw new RuntimeException(
+                'extensions.http-client.proxy is set while extensions.http-client.egress.'
+                . 'block_private_ips is enabled. The proxy resolves the destination hostname itself, '
+                . 'so the addresses validated here are not the ones connected to and the private-IP '
+                . 'check cannot be enforced. Set egress.block_private_ips=false to state that the '
+                . 'trusted proxy owns that policy, or remove the proxy to keep enforcement here.'
+            );
+        }
+
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.http-client.enabled', true),
+            enabled: $enabled,
             retries: max(0, Cast::int($raw['retries'] ?? null, 'extensions.http-client.retries', 5)),
             retryDelay: max(0, Cast::int($raw['retry_delay'] ?? null, 'extensions.http-client.retry_delay', 1)),
             timeout: max(1, Cast::int($raw['timeout'] ?? null, 'extensions.http-client.timeout', 10)),
@@ -71,7 +89,7 @@ final readonly class Config
             proxy: $proxy,
             cookieJarDir: $cookieJarDir,
             allowedProtocols: self::filterProtocols($raw['allowed_protocols'] ?? null),
-            egress: Egress::fromArray(Map::section($raw, 'egress')),
+            egress: $egress,
         );
     }
 

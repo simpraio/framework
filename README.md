@@ -19,6 +19,7 @@ This is not missing architecture. It is smaller architecture on purpose. See [do
 ## Requirements
 
 - PHP 8.4+
+- PHP `mbstring` extension
 - Optional: APCu 5+ for shared in-memory cache
 - Optional: MySQL 8+ or MariaDB 11+ for DB-backed extensions
 

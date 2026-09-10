@@ -73,13 +73,13 @@ final readonly class Client
 
     public function send(Envelope $envelope): void
     {
-        $from = self::extractAddress($envelope->headers()['From'] ?? '');
-
-        if ($from === '') {
+        if ($envelope->fromEmail === null) {
             throw new RuntimeException('SMTP_FROM_MISSING');
         }
 
-        $this->command('MAIL FROM:<' . $from . '>', 250);
+        // No SMTPUTF8 parameter: HeaderRules keeps every header ASCII, so there is no raw
+        // UTF-8 field to announce. Unicode travels RFC 2047/2231-encoded.
+        $this->command('MAIL FROM:<' . $envelope->fromEmail . '>', 250);
 
         foreach ($envelope->recipients() as $recipient) {
             $this->command('RCPT TO:<' . $recipient . '>', [250, 251]);
@@ -153,10 +153,4 @@ final readonly class Client
         return (string)preg_replace(pattern: '/^\./m', replacement: '..', subject: $body);
     }
 
-    private static function extractAddress(string $header): string
-    {
-        $match = [];
-
-        return preg_match('/<([^>]+)>/', $header, $match) === 1 ? $match[1] : trim($header);
-    }
 }

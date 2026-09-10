@@ -36,7 +36,9 @@ final class Message
 
     public function subject(string $subject): self
     {
-        $this->subject = trim($subject);
+        // Ordinary whitespace only: a plain trim() also strips CR, LF, NUL and VT, which would
+        // quietly remove a control the header rules refuse everywhere else in the same subject.
+        $this->subject = trim($subject, characters: " \t");
 
         return $this;
     }
@@ -182,11 +184,17 @@ final class Message
         }
 
         $mimeType = $finfo->buffer($data);
-        $sanitized = str_replace(['\\', '"', ';', "\r", "\n"], ['\\\\', '\"', '', '', ''], $name);
+        $normalized = (string)preg_replace(pattern: '/[\x00-\x1F\x7F]+/', replacement: '_', subject: $name);
+        $fallback = (string)preg_replace(pattern: '/[^\x20-\x7E]/', replacement: '_', subject: $normalized);
+        $fallback = substr(
+            string: str_replace(search: ['\\', '"', ';'], replace: '_', subject: $fallback),
+            offset: 0,
+            length: 180,
+        );
 
         return [
-            'filename' => $sanitized,
-            'encodedFilename' => rawurlencode($name),
+            'filename' => $fallback !== '' ? $fallback : 'attachment',
+            'encodedFilename' => rawurlencode($normalized),
             'mimeType' => is_string($mimeType) && $mimeType !== '' ? $mimeType : 'application/octet-stream',
             'data' => $data,
         ];

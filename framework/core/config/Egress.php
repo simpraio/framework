@@ -9,11 +9,23 @@ namespace core\config;
  *
  * When enabled, only exact allowlisted hosts are reachable. An empty allowlist
  * denies everything. When blockPrivateIps is enabled, an allowlisted host that
- * resolves to a private/reserved IP is rejected as defense in depth.
+ * resolves to a non-globally-routable IP is rejected as defense in depth - wider than the private
+ * and reserved ranges, since shared address space (100.64.0.0/10) and the benchmarking and
+ * documentation ranges are refused too. Being special-purpose is not the test: the ranges RFC 6890
+ * marks globally reachable, such as the NAT64 prefix 64:ff9b::/96, stay allowed. A host that does not
+ * resolve at all is rejected too. {@see resolvedFor} returns the validated addresses so the
+ * transport can connect to those rather than resolve the name a second time.
  */
 final readonly class Egress
 {
-    /** Per-process DNS cache TTL (seconds). Short enough not to widen the rebind window. */
+    /**
+     * Per-process DNS cache TTL (seconds).
+     *
+     * Not a rebinding control. The addresses returned here are pinned onto the connection, so a
+     * request reaches an address that was validated whether it came from this cache or a fresh
+     * lookup. What the TTL bounds is freshness: how long a retry or a later request keeps using
+     * addresses that may have moved, and how soon a failover is picked up.
+     */
     private const int RESOLVE_CACHE_TTL = 5;
 
     /** @param list<string> $allowlist lowercased exact hosts */
@@ -36,42 +48,63 @@ final readonly class Egress
 
     public function allows(string $url): bool
     {
+        return $this->resolvedFor($url) !== null;
+    }
+
+    /**
+     * The validated addresses a connection to $url must be pinned to, or null when it is denied.
+     *
+     * Returning them is what closes the rebinding window: validating a name and then letting the
+     * transport resolve it again checks one answer and connects to another. The caller must hand
+     * these to the connection instead of the name. An empty list means there is nothing to pin -
+     * the host is already an IP literal, or address checking is off - not that anything goes.
+     *
+     * @return list<string>|null
+     */
+    public function resolvedFor(string $url): ?array
+    {
         if (!$this->enabled) {
-            return true;
+            return [];
         }
 
         $host = parse_url($url, PHP_URL_HOST);
         if (!is_string($host)) {
-            return false;
+            return null;
         }
         $host = strtolower($host);
 
         if (!in_array($host, $this->allowlist, strict: true)) {
-            return false;
+            return null;
         }
 
-        return !$this->blockPrivateIps || $this->resolvesWithoutPrivateIp($host);
-    }
+        if (!$this->blockPrivateIps) {
+            return [];
+        }
 
-    private function resolvesWithoutPrivateIp(string $host): bool
-    {
         $literal = trim($host, characters: '[]');
         if (filter_var($literal, FILTER_VALIDATE_IP) !== false) {
-            return self::isPublicIp($literal);
+            return self::isPublicIp($literal) ? [] : null;
         }
 
         $ips = self::resolveAll($host);
+
+        // Fail closed on an empty answer. Treating "did not resolve" as allowed handed the name
+        // straight to the transport, whose resolver may differ from this one - a host reachable
+        // only over AAAA when the AAAA lookup here failed, for instance - and the address check
+        // was then never applied to what was actually dialed.
         if ($ips === []) {
-            return true;
+            return null;
         }
 
-        return array_all($ips, self::isPublicIp(...));
+        return array_all($ips, self::isPublicIp(...)) ? $ips : null;
     }
 
     /** @return list<string> */
     private static function resolveAll(string $host): array
     {
-        // Short per-process DNS cache; TTL limits stale results for rebinding-sensitive checks.
+        // Per-process cache. A retry inside the TTL reuses these addresses instead of resolving
+        // again; they were validated when first seen and are pinned onto the connection, so the
+        // TTL governs freshness and failover rather than the rebinding window.
         // host => [expires_at, ips]
         /** @var array<string, array{0: int, 1: list<string>}> $cache */
         static $cache = [];
@@ -109,10 +142,10 @@ final readonly class Egress
 
     private static function isPublicIp(string $ip): bool
     {
-        return filter_var(
-            $ip,
-            FILTER_VALIDATE_IP,
-            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
-        ) !== false;
+        // IpRange owns the whole decision, its own backstop included. Re-applying the filter flags
+        // here would undo the table: they refuse addresses IANA marks reachable, such as the PCP
+        // anycast address inside the otherwise non-global 192.0.0.0/24.
+        return !IpRange::isNonGlobal($ip);
     }
+
 }

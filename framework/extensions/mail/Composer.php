@@ -28,24 +28,30 @@ final class Composer
             throw new InvalidArgumentException('NO_RECIPIENT');
         }
 
+        // Resolve and validate the From address once here, so the From header and the Message-ID
+        // derive from the same FILTER_VALIDATE_EMAIL-checked value. messageId() must never see a
+        // raw caller-supplied address: a CRLF after its last '@' would inject further headers.
+        $fromEmail = self::resolveFromEmail($message->fromEmail, $config->fromEmail);
+
         [$body, $contentType] = $message->attachments === []
             ? self::buildAlternative($message->html, $message->text)
             : self::buildMixed($message);
 
         $headers = [
             ...self::customHeaders($message->customHeaders),
-            'From' => self::fromHeader($message, $config),
+            'From' => Header::from($message->fromName ?? $config->fromName, $fromEmail),
             'Date' => new DateTimeImmutable()->format(DATE_RFC2822),
-            'Message-ID' => self::messageId($message, $config),
+            'Message-ID' => self::messageId($fromEmail),
             'MIME-Version' => '1.0',
             'Content-Type' => $contentType,
         ];
 
         return new Envelope(
             recipients: $message->recipients,
-            subject: self::encodeHeader($message->subject),
+            subject: Header::encode($message->subject),
             body: $body,
             headers: $headers,
+            fromEmail: $fromEmail,
         );
     }
 
@@ -97,43 +103,28 @@ final class Composer
 
         foreach ($message->attachments as $att) {
             $body .= self::EOL . implode(self::EOL, [
-                    '--' . $mixedBoundary,
-                    sprintf(
-                        'Content-Type: %s; name="%s"; name*=UTF-8\'\'%s',
-                        $att['mimeType'],
-                        $att['filename'],
-                        $att['encodedFilename'],
-                    ),
-                    'Content-Transfer-Encoding: base64',
-                    sprintf(
-                        'Content-Disposition: attachment; filename="%s"; filename*=UTF-8\'\'%s',
-                        $att['filename'],
-                        $att['encodedFilename'],
-                    ),
-                    '',
-                    chunk_split(base64_encode($att['data']), length: 76, separator: self::EOL),
-                ]);
+                '--' . $mixedBoundary,
+                Header::attachment(
+                    'Content-Type: ' . $att['mimeType'],
+                    'name',
+                    $att['filename'],
+                    $att['encodedFilename'],
+                ),
+                'Content-Transfer-Encoding: base64',
+                Header::attachment(
+                    'Content-Disposition: attachment',
+                    'filename',
+                    $att['filename'],
+                    $att['encodedFilename'],
+                ),
+                '',
+                chunk_split(base64_encode($att['data']), length: 76, separator: self::EOL),
+            ]);
         }
 
         $body .= self::EOL . '--' . $mixedBoundary . '--';
 
         return [$body, sprintf('multipart/mixed; boundary="%s"', $mixedBoundary)];
-    }
-
-    private static function fromHeader(Message $message, Config $config): string
-    {
-        $email = self::resolveFromEmail($message->fromEmail, $config->fromEmail);
-        $name = (string)preg_replace(
-            pattern: '/[\r\n]+/',
-            replacement: ' ',
-            subject: trim(
-            $message->fromName ?? $config->fromName
-        )
-        );
-
-        return $name !== ''
-            ? self::encodeHeader($name) . ' <' . $email . '>'
-            : $email;
     }
 
     private static function resolveFromEmail(?string $messageEmail, string $configEmail): string
@@ -147,11 +138,16 @@ final class Composer
         throw new RuntimeException('MAIL_FROM_MISSING');
     }
 
-    private static function messageId(Message $message, Config $config): string
+    /**
+     * @param string $fromEmail a FILTER_VALIDATE_EMAIL-checked address, resolved once in build().
+     *                          That validation is what guarantees the derived domain carries no
+     *                          CRLF and so cannot inject additional headers into the message.
+     */
+    private static function messageId(string $fromEmail): string
     {
-        $email = $message->fromEmail ?? $config->fromEmail;
-        $at = strrpos(haystack: $email, needle: '@');
-        $domain = $at !== false ? substr(string: $email, offset: $at + 1) : 'localhost.localdomain';
+        // A validated address always contains '@', so strrpos never returns false; the cast
+        // states that invariant for the type checker.
+        $domain = substr(string: $fromEmail, offset: (int)strrpos(haystack: $fromEmail, needle: '@') + 1);
 
         return sprintf('<%s@%s>', bin2hex(random_bytes(16)), $domain);
     }
@@ -165,15 +161,27 @@ final class Composer
         $normalized = [];
 
         foreach ($headers as $name => $value) {
-            $name = trim($name);
-            $value = trim($value);
+            // Only ordinary whitespace is trimmed, and the value is judged before it is: a plain
+            // trim() also strips CR, LF, NUL and VT, so an edge-positioned control would be gone
+            // before any check saw it and the header kept as though it had been clean.
+            $name = trim($name, characters: " \t");
 
             if (
                 $name === ''
                 || $value === ''
+                // A caller's value is not folded, so any CRLF in it is malformed rather than
+                // a continuation - stricter here than the shared rule needs to be.
                 || preg_match('/[\r\n]/', $name . $value) === 1
+                || !HeaderRules::nameIsValid($name)
+                || !HeaderRules::isRenderable($name, $value)
                 || in_array(strtolower($name), self::RESERVED_HEADERS, strict: true)
             ) {
+                continue;
+            }
+
+            $value = trim($value, characters: " \t");
+
+            if ($value === '') {
                 continue;
             }
 
@@ -181,15 +189,6 @@ final class Composer
         }
 
         return $normalized;
-    }
-
-    private static function encodeHeader(string $value): string
-    {
-        $normalized = (string)preg_replace(pattern: '/[\r\n]+/', replacement: ' ', subject: $value);
-
-        return preg_match('/[^\x20-\x7E]/', $normalized) === 1
-            ? sprintf('=?UTF-8?B?%s?=', base64_encode($normalized))
-            : $normalized;
     }
 
     private static function encodeBody(string $body): string

@@ -6,6 +6,7 @@ $core = __DIR__;
 
 require_once $core . '/config/Cast.php';
 require_once $core . '/config/Map.php';
+require_once $core . '/config/IpRange.php';
 require_once $core . '/config/Egress.php';
 require_once $core . '/config/loader/Env.php';
 require_once $core . '/config/loader/Files.php';

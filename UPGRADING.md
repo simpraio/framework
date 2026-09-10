@@ -61,6 +61,88 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 5.0.0 -> 5.1.0
+
+**Impact:** PHP `mbstring` is now an explicit framework requirement, and three behaviours
+tighten: boot fails when a proxy is configured while the egress guard is enforcing addresses,
+outbound calls to addresses that are not globally routable are refused, and mail subjects and
+header values are held to printable ASCII and tab. There are no configuration or schema
+changes, but read the Conditional steps before deploying.
+
+### Required
+
+1. Verify that `mbstring` is enabled with `php -m`. On Debian/Ubuntu, install the
+   package matching your PHP version, such as `php8.4-mbstring`. Mail composition
+   now reports `MAIL_MBSTRING_REQUIRED` instead of failing with an undefined-function
+   error when the extension is absent.
+
+### Conditional
+
+1. If your application constructs `extensions\mail\Envelope` directly for SMTP, you may
+   pass the validated envelope sender as the optional fifth `fromEmail` argument. When it
+   is omitted, the final valid mailbox in the `From` header is used. The original four
+   constructor arguments are unchanged. Invalid sender or recipient addresses are rejected.
+2. If your application sets custom mail headers through `$msg->header()`, check that the
+   names are valid RFC 5322 field names, that the values contain **printable ASCII and tab
+   only**, and that no rendered header line exceeds 998 octets. Anything else is dropped
+   silently, as CR/LF-bearing and reserved headers already were, so a header that stops
+   arriving is the symptom to expect. That rule is narrower than "valid UTF-8 without
+   controls": a raw non-ASCII byte is rejected even in well-formed UTF-8, because raw UTF-8
+   header fields need SMTPUTF8, which this client does not negotiate. Supply the ASCII form
+   that the particular header's grammar calls for. An RFC 2047 encoded-word
+   (`=?UTF-8?B?...?=`) is valid only where that grammar admits one - an unstructured value, a
+   comment, or a display-name phrase - and never inside an address, token or quoted string
+   (RFC 2047 section 5), so `Reply-To` encoded as one word is a field with no mailbox in it,
+   which this extension cannot detect for you. Subjects, display names and attachment
+   filenames are encoded for you and are unaffected. Only spaces and tabs are trimmed from a
+   name or value, and the value is checked before it is trimmed, so a stray control at
+   either edge drops the header rather than being stripped and the remainder sent.
+3. If your application puts untrusted text in a mail subject, be ready for
+   `InvalidArgumentException('INVALID_MAIL_HEADER_VALUE')`: invalid UTF-8, a line break, or
+   any other control character except tab is now refused rather than flattened or
+   base64-wrapped and delivered. Sanitize the text, or catch it where the message is built.
+   `$msg->subject()` trims spaces and tabs only, so a subject that merely ends in a newline
+   is refused now where it was previously trimmed and sent; trim it yourself if that is the
+   behaviour you want.
+4. If your application constructs `extensions\mail\Envelope` directly, it now refuses
+   (as `INVALID_ENVELOPE_HEADER`) a subject or header value containing anything other than
+   printable ASCII and tab, a name that is not an RFC 5322 field name, and any rendered line
+   over 998 octets. Tab is legal header whitespace and is kept. A CRLF is accepted only where
+   it begins a folded continuation line, which is what Composer produces.
+
+5. If an allowlisted outbound host resolves through a flaky or split-horizon resolver, note that
+   a lookup returning nothing is now a refusal rather than a pass. The guard validates addresses,
+   so no addresses meant no check ran.
+6. If you call a service whose address is not globally routable, it is refused now: the check
+   widened from "outside the private and reserved ranges" to "globally routable", so carrier-grade
+   NAT (`100.64.0.0/10`) and the benchmarking and documentation ranges are included. Special-purpose
+   ranges that are globally reachable, such as the NAT64 prefix `64:ff9b::/96`, are unaffected.
+   Allowlisting
+   the host does not lift this - the address check runs after the allowlist. Either set
+   `extensions.http-client.egress.block_private_ips` to `false`, which drops the address check for
+   every host and leaves the allowlist as the only control, or reach the service through an
+   endpoint that is globally routable.
+
+7. If `extensions.http-client.proxy` is set while the egress guard is enabled with
+   `block_private_ips`, boot now fails. The two cannot both hold: the proxy resolves the
+   destination itself, so the addresses validated here are not the ones dialled. Set
+   `block_private_ips: false` to record that the proxy owns that policy, or drop the proxy. A
+   disabled egress guard is unaffected, since `block_private_ips` does nothing there.
+
+### Good to know
+
+The egress guard hands the addresses it validated to cURL as `CURLOPT_RESOLVE`, so the name is
+resolved once rather than twice. Every redirect hop and retry is authorized and pinned in turn;
+within the short DNS cache window a retry reuses the addresses already validated rather than
+resolving again. That guarantee covers direct
+connections; through a proxy the destination is resolved at the proxy, which is why the two are
+refused together. `CURLOPT_PROXY` is now always sent so a stray `http_proxy` or `ALL_PROXY` in the
+environment cannot route outbound requests without the configuration saying so.
+
+Long subjects are encoded into bounded RFC 2047 encoded-words, attachment filenames use
+RFC 2231 continuations, recipient lists fold between addresses, and long display names are
+encoded. Short ASCII subjects are unchanged.
+
 ## 4.0.0 -> 5.0.0
 
 **Impact:** a maintenance window and data migration are required if the database contains

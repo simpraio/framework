@@ -16,13 +16,14 @@ The web root must be `public/`. There is no Composer install step and no require
 Make sure you have the following before starting:
 
 - **PHP 8.4+** - verify your version with `php -v`. Available via `brew install php` on macOS or `apt install php8.4` on Debian/Ubuntu. On Windows, use [windows.php.net](https://windows.php.net/download/) or a package like XAMPP.
+- **PHP mbstring extension** - required for UTF-8 text handling. On Debian/Ubuntu, install the package matching your PHP version, such as `php8.4-mbstring`.
 - **Git** - required to clone the framework. Verify with `git --version`.
 - **APCu** - optional for basic pages, but highly recommended in production. It provides the shared cache tier for templates, asset versions, route aliases, SEO, translation, registry, auth access checks, auth group lookups, and error-log purge guards. It is currently required only by the optional `ratelimit` extension; auth login throttling falls back to locked local files when APCu is unavailable.
 - **MySQL 8+ or MariaDB 11+** - only needed when DB-backed extensions are enabled. You can skip this for a basic setup and add it later.
 
 ## Setup Steps
 
-1. Install PHP 8.4 or newer and verify it is available with `php -v`. `pdo_mysql` is only required when DB-backed features are enabled; `apcu` is recommended for production caching and required when `ratelimit` is enabled.
+1. Install PHP 8.4 or newer with `mbstring`, and verify both with `php -v` and `php -m`. `pdo_mysql` is only required when DB-backed features are enabled; `apcu` is recommended for production caching and required when `ratelimit` is enabled.
 2. Clone the source checkout, then copy the contents of its `framework/` directory into
    your application root. Copy `tools/` and `VERSION` alongside it so schemas, maintenance
    tools, and the installed-version marker are available at the paths used in this guide.

@@ -29,6 +29,21 @@ return [
 ];
 ```
 
+### Egress (SSRF) options
+
+| Key | Description |
+| --- | --- |
+| `enabled` | Turns the guard on. When on, only `allowlist` hosts are reachable; an empty allowlist denies everything. |
+| `allowlist` | Exact hostnames, compared case-insensitively. Not patterns, not suffixes. |
+| `proxy` | Operator-only outbound proxy, never a per-request option. Always passed to cURL (empty when unset) so environment variables cannot route traffic silently, and when set, no host is exempt from it - `NO_PROXY` cannot force a direct connection. A proxy resolves the destination itself, so it cannot be combined with a guard that is enabled and enforcing addresses - boot fails then. With the guard disabled, `block_private_ips` does nothing and a proxy is accepted. |
+| `block_private_ips` | Also requires every address the host resolves to be **globally routable**. This is wider than private and reserved: shared address space (`100.64.0.0/10`, carrier-grade NAT) and the benchmarking and documentation ranges are refused too. Special-purpose ranges that RFC 6890 marks globally reachable — the NAT64 prefix `64:ff9b::/96`, AS112, AMT — remain allowed, because they are routable on the internet. Reachability comes from a static classification of the IANA special-purpose registries, matched longest-prefix-first so a reachable range nested inside an unreachable one is honoured. PHP's `FILTER_FLAG_GLOBAL_RANGE` applies only where that table is silent, since it accepts several ranges IANA marks non-global. A host that resolves to nothing is refused as well - there is no address to check. The validated addresses are then pinned onto the connection, so cURL does not resolve the name again. |
+
+To reach a destination that is deliberately not globally routable - an internal service behind
+carrier-grade NAT, for instance - allowlisting the host is not enough, because the address check
+runs after the allowlist. Either set `block_private_ips` to `false`, which drops that check for
+every host and leaves the allowlist as the only control, or route the call through an endpoint that
+does have a globally routable address.
+
 ## Public API
 
 | Call | Returns | Description |

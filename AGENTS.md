@@ -52,6 +52,11 @@ comparison, and `tools/verify-vendored.php` in the framework repository automate
 
 Simpra is a minimal PHP 8.4+ framework for small websites, internal tools, and simple SaaS projects.
 
+Requires the `mbstring` extension. It is not merely convenient for one extension: `core/tools/Format.php`,
+used throughout, calls `mb_strtoupper`/`mb_strtolower` directly with no fallback, and
+`extensions/mail/Header.php` throws its own `MAIL_MBSTRING_REQUIRED` at first use if it is missing.
+There is no `composer.json` to declare it formally; this is the declaration.
+
 Optimize for:
 
 - Simple explicit code.

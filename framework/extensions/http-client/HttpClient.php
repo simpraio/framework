@@ -6,6 +6,7 @@ namespace extensions\http_client;
 
 use core\config\Config as CoreConfig;
 use extensions\http_client\curl\Options;
+use extensions\http_client\curl\Resolve;
 use extensions\http_client\curl\RequestOptions;
 
 final class HttpClient
@@ -46,16 +47,27 @@ final class HttpClient
         int $redirects = 0,
     ): Response
     {
+        // Re-authorize here rather than trusting the caller's check, because this is also the
+        // retry and redirect recursion point: every dial gets its own validated addresses.
+        $pinned = $config->egress->resolvedFor($url);
+        if ($pinned === null) {
+            throw new HttpClientException('HTTP client egress blocked', self::safeUrlLabel($url));
+        }
+
         $handle = curl_init();
         $responseHeaders = [];
         $body = '';
 
-        curl_setopt_array($handle, Options::curl($config, $url, $options, $responseHeaders, $body));
+        $curlOptions = Options::curl($config, $url, $options, $responseHeaders, $body);
+        if ($pinned !== []) {
+            // Pin the connection to the addresses the egress guard validated. Without this curl
+            // resolves the name a second time and may reach an address that was never checked.
+            $curlOptions[CURLOPT_RESOLVE] = [Resolve::entry($url, $pinned)];
+        }
 
-        $ok = curl_exec($handle);
-        $error = curl_errno($handle);
-        $status = (int)curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $message = curl_error($handle);
+        self::configure($handle, $curlOptions, $url);
+
+        [$ok, $error, $status, $message] = self::execute($handle);
 
         // Drop the handle before retry recursion so retries do not stack live handles.
         unset($handle);
@@ -99,6 +111,31 @@ final class HttpClient
         }
 
         return self::attempt($config, $url, $options, $retry + 1, $redirects);
+    }
+
+    /**
+     * curl_setopt_array() stops at the first option libcurl rejects and applies none after it,
+     * with no warning - the pinned addresses, headers, the method and the body all follow the
+     * URL, so a partial setup must not send.
+     *
+     * @param array<int, mixed> $curlOptions
+     */
+    private static function configure(\CurlHandle $handle, array $curlOptions, string $url): void
+    {
+        if (!curl_setopt_array($handle, $curlOptions)) {
+            throw new HttpClientException('Could not configure the cURL handle', $url);
+        }
+    }
+
+    /** @return array{0: bool, 1: int, 2: int, 3: string} [ok, curlError, httpStatus, curlMessage] */
+    private static function execute(\CurlHandle $handle): array
+    {
+        return [
+            curl_exec($handle) !== false,
+            curl_errno($handle),
+            (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE),
+            curl_error($handle),
+        ];
     }
 
     /**

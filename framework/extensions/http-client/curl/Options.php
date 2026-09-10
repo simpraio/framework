@@ -62,7 +62,22 @@ final class Options
      */
     private static function proxyOptions(Config $config): array
     {
-        return $config->proxy === null ? [] : [CURLOPT_PROXY => $config->proxy];
+        // Always set explicitly. With CURLOPT_PROXY absent libcurl falls back to http_proxy,
+        // HTTPS_PROXY or ALL_PROXY from the environment, and the request would then be resolved
+        // and dialled by that proxy - the pinned addresses never apply, with no configuration
+        // anywhere saying a proxy is in use. An empty string means "no proxy, ignore the env".
+        if ($config->proxy === null) {
+            return [CURLOPT_PROXY => ''];
+        }
+
+        return [
+            CURLOPT_PROXY => $config->proxy,
+            // Setting a proxy does not stop NO_PROXY / no_proxy in the environment from exempting
+            // a host from it and connecting direct. A proxy may only be configured while the
+            // egress guard is not enforcing addresses, so the proxy owns that policy and this
+            // client pins nothing - a direct connection there has neither. Empty exempts no host.
+            CURLOPT_NOPROXY => '',
+        ];
     }
 
     private static function userAgent(): string
