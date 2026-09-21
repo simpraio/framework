@@ -61,13 +61,37 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 5.1.0 -> 5.1.1
+
+**Impact:** none for most applications. Replace the framework files; there are no
+configuration or schema changes. A redirect target or auth redirect value carrying an ASCII
+control character is now refused where it was previously accepted or silently trimmed.
+
+### Conditional
+
+1. If `extensions.auth`'s `guest_route`, `denied_redirect` or `logout_redirect` holds an ASCII
+   control character or DEL, it now fails during configuration loading as
+   `INVALID_AUTH_REDIRECT_PATH` instead of being trimmed and reaching a `Location` header.
+   Remove the control character; ordinary surrounding spaces are still ignored.
+2. If application code passes such a value to `Response::redirect()` or `Auth::logout()`, it now
+   throws `InvalidArgumentException`. The guard widened from CR, LF and NUL to every ASCII
+   control and DEL, tab included.
+
+### Good to know
+
+Browsers strip tabs and newlines while parsing a URL and read a backslash as a slash, so a value
+such as slash-tab-backslash-host passed the old local-path guard and was then interpreted as a
+protocol-relative URL naming another origin. Rejecting the whole control range closes that
+reading rather than trying to anticipate each browser normalisation.
+
 ## 5.0.0 -> 5.1.0
 
 **Impact:** PHP `mbstring` is now an explicit framework requirement, and four behaviours
 change: boot fails when a proxy is configured while the egress guard is enforcing addresses,
-outbound calls to addresses that are not globally routable are refused, mail subjects and
-header values are held to printable ASCII and tab, and an auth redirect configured with a
-leading slash loses its trailing slash. There are no configuration or schema changes, but
+outbound calls to addresses that are not globally routable are refused, raw mail header bytes
+are held to printable ASCII and tab while Unicode subjects remain RFC 2047 encoded, and an
+auth redirect configured with a leading slash loses its trailing slash. There are no new
+configuration keys or schema changes, but existing auth redirect values may need adjustment;
 read the Conditional steps before deploying.
 
 ### Required
@@ -124,9 +148,10 @@ read the Conditional steps before deploying.
    every host and leaves the allowlist as the only control, or reach the service through an
    endpoint that is globally routable.
 
-7. If `extensions.http-client.proxy` is set while the egress guard is enabled with
-   `block_private_ips`, boot now fails. The two cannot both hold: the proxy resolves the
-   destination itself, so the addresses validated here are not the ones dialled. Set
+7. If the HTTP client is enabled, `extensions.http-client.proxy` is set, and the egress guard
+   is enabled with `block_private_ips`, boot now fails. A proxy and application-side address
+   enforcement cannot both hold: the proxy resolves the destination itself, so the addresses
+   validated here are not the ones dialled. Set
    `block_private_ips: false` to record that the proxy owns that policy, or drop the proxy. A
    disabled egress guard is unaffected, since `block_private_ips` does nothing there.
 
@@ -140,7 +165,6 @@ read the Conditional steps before deploying.
 9. If you call `Auth::logout($route)` with a route argument, it follows the same rule now.
    `Auth::logout('/bye')` redirected to `/bye/` before and redirects to `/bye` now; pass
    `'/bye/'` or `'bye'` to keep the previous target.
-
 ### Good to know
 
 The egress guard hands the addresses it validated to cURL as `CURLOPT_RESOLVE`, so the name is

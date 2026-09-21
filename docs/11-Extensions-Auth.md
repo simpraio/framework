@@ -45,7 +45,8 @@ to `/bye` and `Auth::logout('bye')` to `/bye/`.
 
 Leading slashes and backslashes collapse, so a value can only ever name a path on this site:
 `'//host'` and `'/\host'` both become `/host`. A browser reads a backslash in a URL as a
-slash, so both would otherwise be protocol-relative URLs naming another origin.
+slash, so both would otherwise be protocol-relative URLs naming another origin. Values containing
+ASCII control characters or DEL are invalid and fail during configuration loading.
 
 The `auth_group`, `auth_user`, and `auth_access` database tables are required once auth is enabled. Schemas are in `tools/schema/auth.sql`.
 

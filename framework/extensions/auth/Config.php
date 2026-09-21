@@ -6,6 +6,7 @@ namespace extensions\auth;
 
 use core\config\Cast;
 use core\config\Config as CoreConfig;
+use InvalidArgumentException;
 
 final readonly class Config
 {
@@ -65,19 +66,26 @@ final readonly class Config
      * canonical URLs carry no trailing slash can configure `/login` and get `/login`
      * rather than a redirect to `/login/` that its own rewrite then sends back.
      *
-     * A bare name keeps the `/name/` shape this has always produced, so a configuration
-     * written before the distinction existed still means what it meant.
+     * A bare name denotes a route name and uses the `/name/` shape.
      *
      * Leading slashes and backslashes collapse, so the result always names a path on this
      * site: `//host` is a protocol-relative URL naming another origin, and a browser reads
      * the `/\host` form the same way, since it treats a backslash in a URL as a slash.
+     * ASCII controls and DEL are invalid because browsers normalize some of them before
+     * interpreting the URL.
      *
      * Public because {@see Auth::logout()} takes the same value as an argument, and a route
      * given there has to mean what the configured one means.
+     *
+     * @throws InvalidArgumentException
      */
     public static function redirectPath(string $configured): string
     {
-        $value = trim($configured);
+        if (preg_match('/[\x00-\x1F\x7F]/', $configured) === 1) {
+            throw new InvalidArgumentException('INVALID_AUTH_REDIRECT_PATH');
+        }
+
+        $value = trim(string: $configured, characters: ' ');
         $segments = trim(string: $value, characters: "/\\");
 
         if ($segments === '') {

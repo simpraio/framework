@@ -50,7 +50,7 @@ final class Response
 
     private static function isAllowedRedirect(string $location): bool
     {
-        if ($location === '' || preg_match('/[\r\n\0]/', $location) === 1) {
+        if ($location === '' || preg_match('/[\x00-\x1F\x7F]/', $location) === 1) {
             return false;
         }
         if (str_starts_with($location, '//') || str_starts_with($location, '/\\')) {

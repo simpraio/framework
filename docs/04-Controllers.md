@@ -171,7 +171,7 @@ Header names are normalized to `Title-Case` automatically - `'x-request-id'` and
 
 ## Redirects
 
-`Response::redirect()` only accepts local paths - the target must start with `/`. External URLs, protocol-relative URLs, and values containing CR, LF, or NUL throw `InvalidArgumentException`.
+`Response::redirect()` only accepts local paths - the target must start with `/`. External URLs, protocol-relative URLs, and values containing ASCII control characters or DEL throw `InvalidArgumentException`. This includes tabs, which browsers remove while parsing URLs and which could otherwise change how a target is interpreted.
 
 ```
 Response::redirect('/dashboard');          // [ok]
