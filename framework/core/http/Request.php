@@ -9,7 +9,8 @@ final class Request
     /** @var array<string, mixed> */
     private array $jsonCache;
     private bool $jsonParsed = false;
-    private const array ALLOWED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+    /** The methods the framework handles, inbound and in the HTTP client. */
+    public const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
     private const array SERVER_HEADER_MAP = [
         'content-type' => 'CONTENT_TYPE',
         'content-length' => 'CONTENT_LENGTH',
@@ -65,8 +66,17 @@ final class Request
 
     public function method(): string
     {
-        $m = strtoupper($this->getString($this->server, 'REQUEST_METHOD') ?? 'GET');
-        return in_array(needle: $m, haystack: self::ALLOWED_METHODS, strict: true) ? $m : 'GET';
+        $m = $this->rawMethod();
+        return in_array(needle: $m, haystack: self::METHODS, strict: true) ? $m : 'GET';
+    }
+
+    /**
+     * The method as the client sent it, upper-cased. method() maps any method outside the ones
+     * this framework handles to GET; use this where an unknown method must not pass for one.
+     */
+    public function rawMethod(): string
+    {
+        return strtoupper($this->getString($this->server, 'REQUEST_METHOD') ?? 'GET');
     }
 
     public function isMethod(string $method): bool
@@ -76,9 +86,7 @@ final class Request
 
     public function path(): string
     {
-        $uri = $this->getString($this->server, 'REQUEST_URI') ?? '/';
-        $q = strpos(haystack: $uri, needle: '?');
-        return $q === false ? $uri : substr(string: $uri, offset: 0, length: $q);
+        return Url::path($this->uri());
     }
 
     public function uri(): string
@@ -153,9 +161,13 @@ final class Request
             return $this->jsonCache;
         }
 
+        // Mark the body parsed only after it decodes, so a malformed body is refused the same way on every call.
+        $decoded = RequestPayload::json($this->rawBody, $this->header('Content-Type'));
+
+        $this->jsonCache = $decoded;
         $this->jsonParsed = true;
-        $this->jsonCache = RequestPayload::json($this->rawBody, $this->header('Content-Type'));
-        return $this->jsonCache;
+
+        return $decoded;
     }
 
     public function rawBody(): string

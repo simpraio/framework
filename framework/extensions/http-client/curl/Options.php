@@ -9,12 +9,6 @@ use extensions\http_client\HttpClientException;
 
 final class Options
 {
-    /** @param array<string, mixed> $options */
-    public static function normalize(array $options): RequestOptions
-    {
-        return new RequestOptions($options);
-    }
-
     /**
      * @param array<string, string|list<string>> $responseHeaders
      * @return array<int, mixed>
@@ -36,9 +30,9 @@ final class Options
                 return strlen($chunk);
             },
             CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_PROTOCOLS_STR => Policy::allowedProtocols($config),
-            CURLOPT_CONNECTTIMEOUT => Policy::connectTimeout($config, $options),
-            CURLOPT_TIMEOUT => Policy::timeout($config, $options),
+            CURLOPT_PROTOCOLS_STR => implode(',', $config->allowedProtocols),
+            CURLOPT_CONNECTTIMEOUT => self::timeout($options->connectTimeout, $config->connectTimeout),
+            CURLOPT_TIMEOUT => self::timeout($options->timeout, $config->timeout),
             CURLOPT_HEADER => false,
             CURLOPT_VERBOSE => false,
             CURLOPT_URL => $url,
@@ -62,20 +56,14 @@ final class Options
      */
     private static function proxyOptions(Config $config): array
     {
-        // Always set explicitly. With CURLOPT_PROXY absent libcurl falls back to http_proxy,
-        // HTTPS_PROXY or ALL_PROXY from the environment, and the request would then be resolved
-        // and dialled by that proxy - the pinned addresses never apply, with no configuration
-        // anywhere saying a proxy is in use. An empty string means "no proxy, ignore the env".
+        // Disable environment proxies: proxy-side DNS would bypass validated-address pins.
         if ($config->proxy === null) {
             return [CURLOPT_PROXY => ''];
         }
 
         return [
             CURLOPT_PROXY => $config->proxy,
-            // Setting a proxy does not stop NO_PROXY / no_proxy in the environment from exempting
-            // a host from it and connecting direct. A proxy may only be configured while the
-            // egress guard is not enforcing addresses, so the proxy owns that policy and this
-            // client pins nothing - a direct connection there has neither. Empty exempts no host.
+            // Environment exclusions must not bypass the configured proxy's egress policy.
             CURLOPT_NOPROXY => '',
         ];
     }
@@ -85,6 +73,11 @@ final class Options
         $userAgent = ini_get('user_agent');
 
         return is_string($userAgent) && $userAgent !== '' ? $userAgent : 'SIMPRA HTTP request/1.0';
+    }
+
+    private static function timeout(?int $value, int $default): int
+    {
+        return $value !== null && $value > 0 ? $value : $default;
     }
 
     /** @return array<int, mixed> */

@@ -38,7 +38,10 @@ final class Map
 
         $map = [];
         foreach (array_keys($value) as $name) {
-            self::copyString($map, $name, $value[$name]);
+            if (!is_string($name) || !is_string($value[$name])) {
+                continue;
+            }
+            $map[$name] = $value[$name];
         }
         return $map;
     }
@@ -57,7 +60,10 @@ final class Map
 
         $list = [];
         foreach (array_keys($value) as $index) {
-            self::addString($list, $value[$index]);
+            if (!is_string($value[$index]) || $value[$index] === '') {
+                continue;
+            }
+            $list[] = $value[$index];
         }
         return array_values(array_unique($list));
     }
@@ -87,19 +93,17 @@ final class Map
         return $map;
     }
 
-    /** @param array<string, string> $map */
-    private static function copyString(array &$map, int|string $key, mixed $value): void
+    /** @param array<string, mixed> $config */
+    public static function hasPath(array $config, string $path): bool
     {
-        if (is_string($key) && is_string($value)) {
-            $map[$key] = $value;
+        $value = $config;
+        foreach (explode('.', $path) as $key) {
+            if (!is_array($value) || !array_key_exists($key, $value)) {
+                return false;
+            }
+            /** @var mixed $value */
+            $value = $value[$key];
         }
-    }
-
-    /** @param list<string> $list */
-    private static function addString(array &$list, mixed $value): void
-    {
-        if (is_string($value) && $value !== '') {
-            $list[] = $value;
-        }
+        return true;
     }
 }

@@ -7,6 +7,7 @@ namespace core;
 use core\error\Page;
 use core\error\SecurityHeaders;
 use core\http\HttpException;
+use core\http\Url;
 use core\log\Writer;
 use ErrorException;
 use Throwable;
@@ -35,17 +36,28 @@ final class ErrorHandler
 
         error_reporting(E_ALL);
         ini_set(option: 'display_errors', value: '0');
+        // Traces are logged and shown in debug pages, and call arguments carry request data and
+        // credentials; #[SensitiveParameter] covers only the parameters someone remembered to mark.
+        ini_set(option: 'zend.exception_ignore_args', value: '1');
 
         set_error_handler(self::onError(...));
         set_exception_handler(self::onException(...));
         register_shutdown_function(self::onShutdown(...));
     }
 
+    /** Recorded and stepped over; everything else in the mask stops the request. */
+    private const int TOLERATED = E_DEPRECATED | E_USER_DEPRECATED;
+
     /** @throws ErrorException */
     private static function onError(int $severity, string $message, string $file, int $line): bool
     {
         if ((error_reporting() & $severity) === 0) {
             return false;
+        }
+
+        if (($severity & self::TOLERATED) !== 0) {
+            self::$log?->log(Writer::WARNING, 'Deprecated: ' . $message, ['file' => $file, 'line' => $line]);
+            return true;
         }
 
         throw new ErrorException($message, 0, $severity, $file, $line);
@@ -102,14 +114,7 @@ final class ErrorHandler
     }
 
     /**
-     * Record an access-control denial. 4xx responses are otherwise unlogged on purpose - a 404
-     * sweep would drown the log - but 401 and 403 are decisions about who may reach what, and a
-     * deployment with no record of them cannot answer "was this route ever refused, and to whom".
-     *
-     * Identity belongs to the auth extension, not core, so only the request coordinates are
-     * recorded here; a product that needs the username should log it where it makes the decision.
-     * Written at WARNING so it survives the default threshold, and never allowed to throw: a
-     * failed audit write must not turn a 403 into a 500.
+     * Audit 401/403 without allowing logging failures to alter the response.
      */
     private static function logDenial(int $status): void
     {
@@ -120,16 +125,16 @@ final class ErrorHandler
         try {
             /** @var mixed $requestUri */
             $requestUri = $_SERVER['REQUEST_URI'] ?? null;
-            $path = is_string($requestUri)
-                ? parse_url(substr(string: $requestUri, offset: 0, length: 2_048), PHP_URL_PATH)
-                : null;
+            $target = is_string($requestUri) ? substr(string: $requestUri, offset: 0, length: 2_048) : '';
+            // A target of any other form, such as http://user:secret@host/x, is logged by its
+            // parsed path alone, so credentials in it never reach the log.
+            $path = Url::isLocal($target) ? Url::path($target) : (Url::parse($target)->path ?? '/');
 
             self::$log->log(Writer::WARNING, "Access denied ({$status})", [
                 'method' => substr(string: self::serverValue('REQUEST_METHOD'), offset: 0, length: 16),
-                // Query values may contain credentials or PII. The route path is sufficient
-                // for access-control auditing and is bounded against log amplification.
+            // Exclude query credentials and bound the untrusted path against log amplification.
                 'path' => substr(
-                    string: is_string($path) ? $path : '/',
+                    string: $path,
                     offset: 0,
                     length: 512,
                 ),

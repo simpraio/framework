@@ -7,9 +7,7 @@ namespace core\extension;
 use core\config\Config;
 
 /**
- * Discovers extensions on disk, applies enabled-flag config, and instantiates
- * Boot classes. Hyphenated folder names map to underscored namespace segments
- * (`http-client` -> `extensions\http_client`).
+ * Hyphenated directories map to underscored namespace segments.
  *
  * @internal
  */
@@ -38,6 +36,7 @@ final class Loader
                 'config' => is_file($configFile) ? $configFile : null,
             ];
         }
+
         return $map;
     }
 
@@ -72,7 +71,26 @@ final class Loader
                 $contributors[] = $instance;
             }
         }
-        return ['hooks' => $hooks, 'contributors' => $contributors];
+        return ['hooks' => self::byPriority($hooks), 'contributors' => self::byPriority($contributors)];
+    }
+
+    /**
+     * Ordered here rather than in the map, so a bundle built before a PRIORITY changed still runs
+     * in the right order. Stable: equal priorities keep the map's folder-name order.
+     *
+     * @template T of object
+     * @param list<T> $instances
+     * @return list<T>
+     */
+    private static function byPriority(array $instances): array
+    {
+        usort($instances, static fn(object $a, object $b): int => self::priority($a) <=> self::priority($b));
+        return $instances;
+    }
+
+    private static function priority(object $instance): int
+    {
+        return $instance instanceof Boot ? $instance::PRIORITY : Boot::PRIORITY;
     }
 
     /** @return list<string> */

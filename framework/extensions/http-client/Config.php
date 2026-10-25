@@ -63,11 +63,7 @@ final readonly class Config
         $enabled = Cast::bool($raw['enabled'] ?? null, 'extensions.http-client.enabled', true);
         $egress = Egress::fromArray(Map::section($raw, 'egress'));
 
-        // A proxy resolves the destination itself, so the addresses this application validated are
-        // never the ones dialled, and CURLOPT_RESOLVE does not reach proxy-side resolution. Leaving
-        // both on would advertise an SSRF address guarantee that cannot hold. Only when the guard
-        // is enabled, and the client itself is: an extension that does not run enforces nothing,
-        // so demanding a setting there would change nothing.
+        // Proxy-side DNS cannot honor the application's validated-address pins.
         if ($enabled && $proxy !== null && $egress->enabled && $egress->blockPrivateIps) {
             throw new RuntimeException(
                 'extensions.http-client.proxy is set while extensions.http-client.egress.'

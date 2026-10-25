@@ -8,16 +8,13 @@ final readonly class Env
 {
     /**
      * @param array<string, string> $map env variable name => target config path (dotted)
-     *        e.g. ['SIMPRA_PROJECT_URL' => 'project.url']
      */
     public function __construct(
         private array $map,
     ) {}
 
     /**
-     * Reads env variables defined in $map and returns a nested config array.
-     * Missing or empty variables are skipped - required-path validation happens later,
-     * after all config layers are merged.
+     * Empty environment values do not override other layers.
      *
      * @return array<string, mixed>
      */

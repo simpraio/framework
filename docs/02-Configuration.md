@@ -33,6 +33,8 @@ Defined in `config/app.php` under the `project` key:
 
 Overrideable via env: `SIMPRA_PROJECT_URL`, `SIMPRA_DEBUG`.
 
+A `timezone` PHP does not know stops the boot with a config error naming the key. The framework's log cannot record it, because the log needs the timezone to stamp its entries, so PHP's own error settings apply: it is written to PHP's error log with `log_errors` on, and shown to the visitor if `display_errors` is on, which it must not be in production.
+
 ## Route & Language Settings
 
 Also in `config/app.php`:
@@ -136,6 +138,26 @@ Execute any additional session setup explicitly after connecting.
 `database.options` is currently limited to string keys, so PDO attribute constants (which are
 integers) set there never reach the driver. Do not rely on it for connection options such as TLS
 settings.
+
+Use `database.ssl` for MySQL TLS, for example in `config/framework.local.php`:
+
+```php
+'database' => [
+    // Other database settings stay unchanged.
+    'ssl' => [
+        'ca' => '/etc/ssl/certs/mysql-ca.pem',
+        'cert' => '',
+        'key' => '',
+        'verify_server_cert' => true,
+    ],
+],
+```
+
+A CA or client certificate/key pair requests TLS. Client certificates are optional,
+but `cert` and `key` must be supplied together. Keep private keys outside `public/`
+and readable only by the application account. Server certificate verification defaults
+to true; configure the issuing CA rather than disabling verification. An empty SSL
+section requests no TLS. These settings apply to MySQL, not other PDO drivers.
 
 ## Extension Config
 

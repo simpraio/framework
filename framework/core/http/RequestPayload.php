@@ -10,10 +10,6 @@ use Throwable;
 
 final class RequestPayload
 {
-    /**
-     * Fallback JSON nesting depth used when the configured value cannot be read
-     * (e.g. before config is loaded). The effective limit is project.max_json_depth.
-     */
     private const int DEFAULT_MAX_DEPTH = 64;
 
     public static function isJson(?string $contentType): bool
@@ -39,11 +35,6 @@ final class RequestPayload
         return self::array($decoded);
     }
 
-    /**
-     * Effective maximum JSON nesting depth (project.max_json_depth), with a safe
-     * constant fallback so this decoder never fails to resolve a limit even before
-     * config loads.
-     */
     private static function maxDepth(): int
     {
         try {

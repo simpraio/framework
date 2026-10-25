@@ -4,20 +4,11 @@ declare(strict_types=1);
 
 namespace core\http;
 
-use core\cache\Cache;
+use core\cache\Optional;
 use core\config\Config;
 use core\config\dto\Route as RouteConfig;
 use core\db\Db;
-use Throwable;
 
-/**
- * URL alias resolver. Translates incoming public paths to internal
- * module/controller routes and resolves canonical public paths for Routes.
- * Disabled by default; when off, it never touches the database.
- *
- * Alias maps are cached per language, so DB reads are warm-up cost rather
- * than per-request work when APCu is available.
- */
 final readonly class Aliases
 {
     public function __construct(
@@ -72,27 +63,13 @@ final readonly class Aliases
      */
     private function map(string $language): array
     {
-        try {
-            return Cache::remember(
-                'aliases.' . $language,
-                fn(): array => $this->safeFetch($language),
-                $this->config->aliasesCacheTtl,
-            );
-        } catch (Throwable) {
-            return [];
-        }
-    }
-
-    /**
-     * @return array<string, array{module: string, controller: string}>
-     */
-    private function safeFetch(string $language): array
-    {
-        try {
-            return $this->fetch($language);
-        } catch (Throwable) {
-            return [];
-        }
+        return Optional::remember(
+            'aliases.' . $language,
+            fn(): array => $this->fetch($language),
+            $this->config->aliasesCacheTtl,
+            [],
+            'Alias map unavailable; falling back to unaliased routing',
+        );
     }
 
     /**

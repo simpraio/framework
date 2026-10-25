@@ -5,35 +5,19 @@ declare(strict_types=1);
 namespace core\config;
 
 /**
- * Whether an address sits in a range IANA does not mark globally reachable.
- *
- * This is the egress guard's boundary, kept apart from the policy in {@see Egress} because it
- * answers a different question: not "may this host be reached" but "is this address routable on the
- * internet at all".
- *
- * The table below is the authority. PHP's `FILTER_FLAG_GLOBAL_RANGE` is documented as following
- * RFC 6890's global attribute but classifies from an incomplete list: on 8.4 and 8.5 it accepts
- * IPv4 and IPv6 multicast, `64:ff9b:1::/48`, `100:0:0:1::/64`, `3fff::/20` and `5f00::/16`. The
- * first of those matters most - RFC 6052 encodes `127.0.0.1` under that prefix as
- * `64:ff9b:1:7f00:0:100::`, splitting the address around the zero `u` octet. The flag is kept only
- * for addresses the table does not classify at all, where it can add a refusal but never an
- * allowance.
+ * The IANA table overrides PHP's incomplete global-range classification.
+ * Filter flags may reject unclassified addresses but never permit a denied range.
  */
 final class IpRange
 {
     /**
      * The IANA special-purpose registries, as `CIDR => globally reachable`.
      *
-     * Matched longest-prefix-first, so a specific entry overrides the block containing it: PCP
-     * anycast at `192.0.0.9/32` is reachable although `192.0.0.0/24` around it is not. Entries PHP
-     * already refuses are listed anyway, so a change in its classification cannot reopen one.
+     * Longest prefix wins, including globally reachable exceptions inside denied ranges.
      *
      * Sources: iana.org/assignments/iana-ipv4-special-registry and .../iana-ipv6-special-registry.
      */
     private const array CLASSIFICATION = [
-        // ---- IPv4 ----
-        // IPv4 is fully allocated, so an address outside these carve-outs is ordinary unicast.
-        // IPv6 is not, and is handled the other way round below.
         '0.0.0.0/8' => false,           // "this network"
         '10.0.0.0/8' => false,          // private
         '100.64.0.0/10' => false,       // shared address space (CGNAT)
@@ -54,11 +38,7 @@ final class IpRange
         '203.0.113.0/24' => false,      // documentation (TEST-NET-3)
         '224.0.0.0/4' => false,         // multicast
         '240.0.0.0/4' => false,         // reserved, incl. 255.255.255.255
-        // ---- IPv6 ----
-        // Only 2000::/3 is allocated as global unicast; every other top-level block is reserved by
-        // the IETF, so IPv6 starts denied and the allocation opens it. Without that a reserved
-        // range - 4000::1, fe00::1 - reads as ordinary unicast merely by being absent from the
-        // special-purpose registry, which lists carve-outs rather than the allocation boundary.
+        // IPv6 defaults denied: the special-purpose registry alone does not cover reserved space.
         '::/0' => false,                // reserved unless an allocation below says otherwise
         '2000::/3' => true,             // global unicast
         '::/128' => false,              // unspecified
@@ -92,7 +72,6 @@ final class IpRange
 
     public static function isNonGlobal(string $ip): bool
     {
-        // Anything that is not an address at all cannot be shown to be routable.
         if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
             return true;
         }
@@ -102,19 +81,37 @@ final class IpRange
             return true;
         }
 
+        $embedded = self::embeddedIpv4($packed);
+        if ($embedded !== null) {
+            return self::isNonGlobal($embedded);
+        }
+
         $classified = self::classify($packed);
         if ($classified !== null) {
             return !$classified;
         }
 
-        // Unclassified, which after the IPv4 carve-outs means ordinary unicast (IPv6 is always
-        // classified, since ::/0 covers it). The filter flags run here only: they can withhold an
-        // address the table does not cover, never permit one it denies.
         return filter_var(
             $ip,
             FILTER_VALIDATE_IP,
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE | FILTER_FLAG_GLOBAL_RANGE,
         ) === false;
+    }
+
+    /**
+     * Validate the embedded IPv4: a globally reachable NAT64 prefix can still target private services.
+     *
+     * @param string $packed the address in inet_pton form
+     */
+    private static function embeddedIpv4(string $packed): ?string
+    {
+        if (strlen($packed) !== 16 || !self::contains('64:ff9b::', 96, $packed)) {
+            return null;
+        }
+
+        $address = inet_ntop(substr(string: $packed, offset: 12, length: 4));
+
+        return $address === false ? null : $address;
     }
 
     /**
@@ -148,7 +145,6 @@ final class IpRange
     {
         $subnetPacked = inet_pton($subnet);
 
-        // An IPv4 address never matches an IPv6 range, and vice versa.
         if ($subnetPacked === false || strlen($subnetPacked) !== strlen($packed)) {
             return false;
         }
@@ -167,8 +163,6 @@ final class IpRange
             return true;
         }
 
-        // Compare the partial byte through the mask, as integers: a string `&` would work but the
-        // analyzer cannot type it, and the intent reads better this way.
         $mask = (0xFF << (8 - $remainingBits)) & 0xFF;
 
         return (ord($packed[$wholeBytes]) & $mask) === (ord($subnetPacked[$wholeBytes]) & $mask);

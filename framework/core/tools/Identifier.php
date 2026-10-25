@@ -40,11 +40,7 @@ final class Identifier
     }
 
     /**
-     * Generates UUIDv7-shaped IDs ordered within this PHP process.
-     *
-     * The timestamp prefix is milliseconds. When multiple IDs are created in the
-     * same millisecond, or the clock moves backwards, rand_a is used as a
-     * per-process counter. If the counter is exhausted, the timestamp advances by 1ms.
+     * Monotonic within this process, including clock rollback; not ordered across workers.
      */
     public static function uuid(): string
     {

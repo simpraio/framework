@@ -58,11 +58,7 @@ final readonly class Envelope
     }
 
     /**
-     * The addresses as a `To:` header value, folded between addresses so no line passes
-     * Header::MAX_LINE_BYTES.
-     *
-     * Both transports want this form: the SMTP client writes the header itself, and mail() writes
-     * "To: <this>" verbatim and preserves the folding.
+     * Both transports require a folded To value within the RFC 5322 line limit.
      */
     public function recipientsLine(): string
     {

@@ -9,9 +9,6 @@ use core\extension\Boot as ExtensionBoot;
 use core\extension\Bootable;
 use core\Log;
 
-/**
- * Logs once when the operator deliberately enables insecure TLS mode.
- */
 final class Boot extends ExtensionBoot implements Bootable
 {
     public function boot(): void

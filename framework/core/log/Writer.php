@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace core\log;
 
 use core\cache\Cache;
+use core\tools\Directory;
 use core\tools\Format;
-use RuntimeException;
 
 final class Writer
 {
@@ -26,26 +26,17 @@ final class Writer
     public function __construct(
         private readonly string $directory,
         public string $level = self::WARNING,
-        public bool $rotateDaily = true,
-        public int $retentionDays = 14,
-        public array $redactKeys = [],
+        public readonly bool $rotateDaily = true,
+        public readonly int $retentionDays = 14,
+        public readonly array $redactKeys = [],
     ) {
-        if (!is_dir($this->directory) && !mkdir(
-                directory: $this->directory,
-                permissions: 0o750,
-                recursive: true,
-            ) && !is_dir($this->directory)) {
-            throw new RuntimeException("Logger: cannot create directory: {$this->directory}");
-        }
+        Directory::ensure($this->directory, 0o750, 'Logger: cannot create directory');
     }
 
     /** @param array<string, mixed> $context */
     public function log(string $level, string $message, array $context = []): void
     {
-        // The logger must never throw: both levels arrive as strings from outside (Log::setLevel()
-        // is public API), and an unindexed key here would surface as an exception on every log
-        // call. An unrecognised message level counts as an error so it is surfaced rather than
-        // filtered away; an unrecognised threshold falls back to the default.
+        // Invalid public-API levels must not break logging or silently discard the message.
         $severity = self::LEVELS[$level] ?? self::LEVELS[self::ERROR];
         if ($severity < (self::LEVELS[$this->level] ?? self::LEVELS[self::WARNING])) {
             return;
@@ -54,7 +45,6 @@ final class Writer
         $suffix = '';
         if ($context !== []) {
             $context = $this->redactKeys === [] ? $context : self::scrub($context, $this->redactKeys);
-            // Keep logging usable when context contains invalid UTF-8 or binary-ish values.
             $encoded = json_encode(
                 $context,
                 JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE

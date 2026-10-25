@@ -4,7 +4,7 @@
 
 | Version | Supported |
 |---|---|
-| 5.x (development) | Yes |
+| 5.x | Yes |
 | 4.x | Yes |
 | 1.x - 3.x | No |
 
@@ -28,6 +28,8 @@ to remain anonymous.
 The following are in scope:
 
 - Authentication and session handling (`extensions/auth`)
+- Microsoft and Google sign-in (`extensions/oidc-login`)
+- Outbound requests: URL checks and the egress guard (`extensions/http-client`)
 - CSRF protection (`extensions/csrf`)
 - Rate limiting (`extensions/ratelimit`)
 - Security headers (`extensions/security`)

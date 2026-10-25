@@ -152,3 +152,25 @@ Partials are just templates - same file format, same token and block API, no spe
 ```
 
 `tokens()`, `rawTokens()`, and `blocks()` return `$this` and can be chained in any order. `renderRows()` and `render()` return strings and terminate the chain.
+
+## Formatting Helpers
+
+`core\tools\Format` holds the string and date helpers the framework itself uses for output:
+
+```php
+use core\tools\Format;
+
+Format::slug('Žluťoučký kůň!');                 // 'zlutoucky-kun'
+Format::datetime(format: 'Y-m-d');              // today, in project.timezone
+Format::escape($userInput);                     // HTML-escaped and trimmed
+```
+
+| Call | Returns | Description |
+| --- | --- | --- |
+| `Format::escape($value, $trim = true)` | `string` | Casts to string and HTML-escapes it as `tokens()` does (`ENT_QUOTES`, `ENT_SUBSTITUTE`, UTF-8). Trims surrounding whitespace unless `$trim` is `false`. |
+| `Format::template($text, $data = [])` | `string` | Replaces `{KEY}` markers: each key of `$data` is upper-cased, so `['name' => …]` fills `{NAME}` and leaves `{name}` alone. **Values are not escaped** - use it for plain text such as a mail subject, never for HTML; for HTML use `Template::tokens()`. |
+| `Format::datetime($timestamp = null, $format = 'Y-m-d H:i:s.u')` | `string` | Formats a Unix timestamp with microseconds - now when `null` - in `project.timezone`. Throws `InvalidArgumentException` for a timestamp that cannot be represented. |
+| `Format::slug($text)` | `string` | A lower-case URL segment: tags stripped, letters transliterated to ASCII, and every run of other characters turned into one `-`, with none at either end. Characters without an ASCII equivalent, such as CJK, are dropped, so the result can be empty. |
+| `Format::ascii($text)` | `string` | Transliterates to ASCII with iconv. The result depends on the platform's iconv - `café` is `cafe` with glibc and `caf'e` on Windows - and the text comes back unchanged when iconv is missing or fails. |
+| `Format::lowercase($text)` | `string` | UTF-8-aware lower case. |
+| `Format::uppercase($text)` | `string` | UTF-8-aware upper case; `ß` becomes `SS`. |

@@ -23,6 +23,8 @@ When enabled, the Boot hook's `after()` method appends the timing report as an H
 | `Profiler::mark($label)` | `void` | Records a named timestamp at the current moment. Labels are free-form strings - use them to describe what just completed. |
 | `Profiler::report()` | `string` | Returns the timing report as an HTML comment string. Called automatically by the Boot hook - you rarely need this directly. |
 
+Labels are HTML-encoded so their text cannot terminate the report's comment or emit markup.
+
 The report lists each mark with time elapsed since the start of the request and since the previous mark:
 
 ```

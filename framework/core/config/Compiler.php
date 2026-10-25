@@ -21,11 +21,8 @@ final readonly class Compiler
     }
 
     /**
-     * Loads defaults < local < env, merges them, validates required paths.
-     *
-     * Pass $defaults to skip re-reading config/*.php (e.g. when they
-     * came from a compiled bundle). Local file and env are always read live -
-     * they hold credentials and per-environment overrides that must not be cached.
+     * Precedence: defaults < local < environment. Only defaults are bundled, never local or
+     * environment overrides; credentials placed in defaults would be bundled too.
      *
      * @param array<string, mixed>|null $defaults
      * @return array<string, mixed>
@@ -53,14 +50,7 @@ final readonly class Compiler
     }
 
     /**
-     * Deep-merge $override onto $base for layered config.
-     *
-     * Associative arrays (maps) merge recursively, so a later layer can override a
-     * single nested key without restating the whole section. Lists and scalars are
-     * REPLACED wholesale: an override list is authoritative, so a local/env layer can
-     * shrink or clear a default list (e.g. egress allowlist, log.redact_keys, CORS
-     * origins) — which array_replace_recursive cannot do, since it overlays lists by
-     * index and leaves stale tail entries behind. An empty array override clears the value.
+     * Maps merge recursively; lists and scalars replace. An empty array clears the value.
      *
      * @param array<string, mixed> $base
      * @param array<string, mixed> $override
@@ -102,7 +92,7 @@ final readonly class Compiler
     {
         $missing = [];
         foreach ($this->requiredPaths as $path) {
-            if (self::has($config, $path)) {
+            if (Map::hasPath($config, $path)) {
                 continue;
             }
             $missing[] = $path;
@@ -112,19 +102,5 @@ final readonly class Compiler
                 'Missing required config paths: ' . implode(', ', $missing),
             );
         }
-    }
-
-    /** @param array<string, mixed> $config */
-    private static function has(array $config, string $path): bool
-    {
-        $value = $config;
-        foreach (explode('.', $path) as $key) {
-            if (!is_array($value) || !array_key_exists($key, $value)) {
-                return false;
-            }
-            /** @var mixed $value */
-            $value = $value[$key];
-        }
-        return true;
     }
 }

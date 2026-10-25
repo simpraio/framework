@@ -9,8 +9,7 @@ use core\http\Route;
 interface Contributor
 {
     /**
-     * Tokens, raw tokens, and blocks to apply to the final rendered template
-     * (layout + page). All keys are optional.
+     * Applied to the final layout and page together.
      *
      * @return array{
      *     tokens?: array<string, string>,

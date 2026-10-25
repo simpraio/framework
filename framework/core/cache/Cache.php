@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace core\cache;
 
 use core\Instance;
+use core\tools\Silently;
 use stdClass;
 
 /**
- * Two-tier cache: per-request Memory backed by APCu when available.
- *
- * Reads check Memory first, then APCu (promoting hits to Memory).
- * TTL applies to APCu only; Memory entries live for the request.
+ * TTL applies to APCu only; in-memory entries live for the request.
  */
 final class Cache
 {
@@ -65,8 +63,7 @@ final class Cache
     }
 
     /**
-     * Store $value only if the key does not already exist (cross-process).
-     * Does not write to the Memory tier; semantics only make sense in APCu.
+     * APCu-only atomic add; does not populate the request-local tier.
      */
     public static function add(string $key, mixed $value, int $ttl = 0): bool
     {
@@ -74,9 +71,7 @@ final class Cache
     }
 
     /**
-     * Atomically increment a counter in APCu. Creates the key if absent.
-     * Invalidates the Memory tier entry so subsequent reads see the updated value.
-     * Returns false when APCu is unavailable.
+     * Returns false without APCu; the request-local tier cannot provide atomic counters.
      */
     public static function inc(string $key, int $step = 1, int $ttl = 0): int|false
     {
@@ -97,8 +92,8 @@ final class Cache
     }
 
     /**
-     * Run $callback at most once per TTL across concurrent processes.
-     * Uses APCu when available, otherwise a host-local file sentinel.
+     * Host-local TTL suppression, not an exactly-once guarantee.
+     * Uses APCu or a file sentinel; unavailable file storage runs the callback unguarded.
      */
     public static function once(string $key, callable $callback, int $ttl, float $waitSeconds = 0.0): bool
     {
@@ -128,11 +123,7 @@ final class Cache
     }
 
     /**
-     * File-mtime fallback for {@see once()} when APCu is disabled. A zero-byte
-     * sentinel is created under sys_get_temp_dir() and its mtime is touched after
-     * the callback runs; subsequent calls within $ttl seconds short-circuit.
-     * flock() guards against concurrent runs on the same host. If the sentinel
-     * cannot be opened, the callback runs unguarded.
+     * Host-local fallback. Runs unguarded if the sentinel cannot be opened.
      */
     private static function onceFile(string $key, callable $callback, int $ttl): bool
     {
@@ -142,13 +133,13 @@ final class Cache
         clearstatcache(true, $path);
         $existed = file_exists($path);
         if ($existed && $ttl > 0) {
-            $mtime = self::silent(static fn(): int|false => filemtime($path));
+            $mtime = Silently::call(static fn(): int|false => filemtime($path));
             if ($mtime !== false && ($now - $mtime) < $ttl) {
                 return false;
             }
         }
 
-        $fp = self::silent(static fn() => fopen(filename: $path, mode: 'c'));
+        $fp = Silently::call(static fn() => fopen(filename: $path, mode: 'c'));
         if ($fp === false) {
             $callback();
             return true;
@@ -161,14 +152,14 @@ final class Cache
 
             if ($existed && $ttl > 0) {
                 clearstatcache(true, $path);
-                $mtime = self::silent(static fn(): int|false => filemtime($path));
+                $mtime = Silently::call(static fn(): int|false => filemtime($path));
                 if ($mtime !== false && ($now - $mtime) < $ttl) {
                     return false;
                 }
             }
 
             $callback();
-            self::silent(static fn(): bool => touch($path));
+            Silently::call(static fn(): bool => touch($path));
             return true;
         } finally {
             flock($fp, LOCK_UN);
@@ -177,11 +168,7 @@ final class Cache
     }
 
     /**
-     * Get value or compute, store, and return it.
-     *
-     * Uses an APCu atomic-add lock so only one process computes on a cold-cache miss.
-     * Losers wait 5 ms and re-check before falling back to computing themselves.
-     * When APCu is unavailable the lock is skipped and all callers may compute.
+     * Stampede protection is best-effort: callers may compute after waiting or without APCu.
      *
      * @template T
      * @param callable(): T $callback
@@ -221,28 +208,11 @@ final class Cache
             $value = $callback();
             self::set($key, $value, $ttl);
         } finally {
-            // Released even when the callback throws, or the lock survives for its whole TTL and
-            // every caller in that window waits on it only to compute anyway.
             if ($lockKey !== null) {
                 $apcu->delete($lockKey);
             }
         }
 
         return $value;
-    }
-
-    /**
-     * @template T
-     * @param callable(): T $operation
-     * @return T
-     */
-    private static function silent(callable $operation): mixed
-    {
-        set_error_handler(static fn(): bool => true);
-        try {
-            return $operation();
-        } finally {
-            restore_error_handler();
-        }
     }
 }

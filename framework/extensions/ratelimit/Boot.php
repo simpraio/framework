@@ -13,6 +13,9 @@ use core\http\Route;
 
 final class Boot extends ExtensionBoot implements Hook
 {
+    /** Ahead of auth and csrf: a request they turn away still counts against the budget. */
+    public const int PRIORITY = -100;
+
     public function before(Request $request, Route $route): ?Response
     {
         $config = $this->config();

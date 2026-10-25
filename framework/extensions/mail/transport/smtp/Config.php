@@ -51,7 +51,7 @@ final readonly class Config implements JsonSerializable
             ) ?? SmtpEncryption::Tls,
             auth: Cast::bool($smtp['auth'] ?? null, 'extensions.mail.smtp.auth', true),
             username: Cast::trimmedString($smtp['username'] ?? null, 'extensions.mail.smtp.username'),
-            password: Cast::trimmedString($smtp['password'] ?? null, 'extensions.mail.smtp.password'),
+            password: Cast::string($smtp['password'] ?? null, 'extensions.mail.smtp.password'),
             timeout: max(1, Cast::int($smtp['timeout'] ?? null, 'extensions.mail.smtp.timeout', 30)),
         );
     }

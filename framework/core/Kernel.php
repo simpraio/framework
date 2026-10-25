@@ -13,8 +13,11 @@ use core\http\Request as HttpRequest;
 use core\http\Response;
 use core\http\Route as ResolvedRoute;
 use core\http\Router;
+use core\http\Url;
 use core\log\Writer as LogWriter;
 use core\session\Store as SessionStore;
+use core\tools\Silently;
+use ReflectionClass;
 use RuntimeException;
 
 final class Kernel
@@ -31,10 +34,18 @@ final class Kernel
         $paths = new Paths($basePath);
         Instance::init($paths->base);
         Config::init($paths);
+        self::setTimezone(Config::project()->timezone);
 
         $container = new Container();
         $container->instance(Paths::class, $paths);
-        $container->bind(LogWriter::class, static fn(): LogWriter => new LogWriter($paths->logs));
+        $logConfig = Config::log();
+        $container->bind(LogWriter::class, static fn(): LogWriter => new LogWriter(
+            $paths->logs,
+            level: $logConfig->level,
+            rotateDaily: $logConfig->rotateDaily,
+            retentionDays: $logConfig->retentionDays,
+            redactKeys: $logConfig->redactKeys,
+        ));
         $container->bind(Connection::class, static fn(): Connection => new Connection(Config::database()));
         $container->bind(SessionStore::class, static fn(): SessionStore => new SessionStore(Config::session()));
         $container->bind(HttpRequest::class, HttpRequest::capture(...));
@@ -49,16 +60,10 @@ final class Kernel
             $paths->bundleDir . '/' . Bundle::EXTENSIONS_FILE,
         ));
 
-        $logConfig = Config::log();
         Log::init($container->log());
-        $writer = $container->log();
-        $writer->level = $logConfig->level;
-        $writer->rotateDaily = $logConfig->rotateDaily;
-        $writer->retentionDays = $logConfig->retentionDays;
-        $writer->prune();
+        $container->log()->prune();
 
         ErrorHandler::register(debug: Config::project()->debug, log: $container->log(), view: $container->view());
-        date_default_timezone_set(Config::project()->timezone);
 
         Db::init($container->db(...));
         Request::init($container->request());
@@ -104,10 +109,30 @@ final class Kernel
         $response->send();
     }
 
+    /** Before the error handler and the log, both of which need the timezone to report anything. */
+    private static function setTimezone(string $timezone): void
+    {
+        if (!Silently::call(static fn(): bool => date_default_timezone_set($timezone))) {
+            throw new RuntimeException("Config: 'project.timezone' must be a timezone PHP knows, got '{$timezone}'");
+        }
+    }
+
     private function routeExists(ResolvedRoute $route): bool
     {
-        return class_exists($this->controllerClass($route))
+        return self::isController($this->controllerClass($route))
             || $this->container->view()->exists("{$route->module}/{$route->controller}");
+    }
+
+    /**
+     * A URL can name any class under modules\; only a concrete Controller is a route.
+     *
+     * @psalm-assert-if-true class-string<Controller> $class
+     */
+    private static function isController(string $class): bool
+    {
+        return class_exists($class)
+            && is_subclass_of($class, Controller::class)
+            && !new ReflectionClass($class)->isAbstract();
     }
 
     private function controllerClass(ResolvedRoute $route): string
@@ -122,10 +147,9 @@ final class Kernel
         $view = $this->container->view();
         $controllerClass = $this->controllerClass($route);
         $templatePath = "{$route->module}/{$route->controller}";
-        $hasController = class_exists($controllerClass);
+        $hasController = self::isController($controllerClass);
         $hasTemplate = $view->exists($templatePath);
 
-        // run() has already established that at least one of the two exists.
         if ($hasController) {
             $instance = $this->makeController($controllerClass, $route);
             $template = $hasTemplate ? $view->load($templatePath) : new Template();
@@ -161,26 +185,22 @@ final class Kernel
     private function validateHost(HttpRequest $request): void
     {
         $allowedHosts = Config::project()->allowedHosts;
-        // An empty list disables the check, and is the DTO's default: a deployment that never sets
-        // project.allowed_hosts accepts any Host header. That holds only while nothing trusts the
-        // header - project.url is the canonical origin for generated links. Set allowed_hosts on
-        // every deployed host regardless.
+        // Empty disables Host validation; generated links must still use project.url.
         if ($allowedHosts === []) {
             return;
         }
 
-        $parsedHost = parse_url('http://' . strtolower($request->header('Host') ?? ''), PHP_URL_HOST);
-        $host = is_string($parsedHost) ? $parsedHost : '';
+        $host = Url::host($request->header('Host') ?? '');
 
-        if (!in_array($host, $allowedHosts, strict: true)) {
+        if ($host === null || !in_array($host, $allowedHosts, strict: true)) {
             throw new HttpException(400);
         }
     }
 
     private function makeController(string $class, ResolvedRoute $route): Controller
     {
-        if (!is_subclass_of($class, Controller::class)) {
-            throw new RuntimeException("{$class} must extend " . Controller::class);
+        if (!self::isController($class)) {
+            throw new RuntimeException("{$class} must be a concrete class extending " . Controller::class);
         }
         return new $class(
             $this->container->view(),

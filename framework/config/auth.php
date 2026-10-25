@@ -13,10 +13,12 @@ return [
             'login_attempts_window'    => 900,
             'revalidate_interval'        => 60,
             'default_policy'             => 'deny',
-            // A leading slash means the value is the path as written: '/login' redirects to
-            // '/login', which is what a site whose canonical URLs carry no trailing slash wants.
-            // A bare name becomes '/name/'.
+            // Leading-slash paths stay exact; bare route names become /name/.
             'guest_route'                => 'login',
+            // Appended to guest_route so a sign-in can return to the page that was asked for.
+            // Empty turns it off, which a project should consider if its URLs carry anything
+            // sensitive in a query string: the target reaches access logs and browser history.
+            'return_param'               => 'return',
             'denied_redirect'            => '',
         ],
     ],

@@ -23,7 +23,7 @@ Instantiate `Validator` with any array (POST body, query params, API payload). C
 | `->email($name, $optional)` | `?string` | Validates an email address using `FILTER_VALIDATE_EMAIL`. |
 | `->pattern($name, $pattern, $trim, $optional)` | `?string` | Validates a string against a regex pattern. |
 | `->in($name, $choices, $optional)` | `mixed` | Validates that the field value is in the given array of allowed values (strict comparison). |
-| `->uuid($name, $version, $optional)` | `?string` | Validates a UUID string. Optionally restricts to a specific version (1-8). |
+| `->uuid($name, $version, $optional)` | `?string` | Validates a UUID string. Optionally restricts to a specific version (1-8); any other version throws `InvalidArgumentException`. |
 | `->datetime($name, $format, $optional)` | `?DateTimeImmutable` | Validates and parses a datetime string using the given format (default `Y-m-d H:i:s`). |
 | `->custom($name, $check, $error, $optional)` | `mixed` | Validates using a callable. The callable receives the raw value and must return `bool`. |
 | `->ok()` | `bool` | Returns `true` if no rule has failed so far. |

@@ -7,20 +7,12 @@ namespace core\config;
 use Throwable;
 
 /**
- * Redacts DTO secret fields from var_dump() and json_encode().
- *
- * #[SensitiveParameter] protects stack traces, not public properties. Redaction
- * defaults to on and fails closed when config cannot be read.
- *
- * NOT hooked: serialize() (must round-trip, so it keeps the real value), and
- * var_export()/print_r() (no redaction hook exists). Do not pass a secret-bearing
- * config DTO to those when emitting to logs.
+ * Protects dumps/JSON only, not serialize(), var_export(), or print_r().
+ * Redacts by default when configuration is unavailable.
  */
 trait RedactsSecrets
 {
     /**
-     * Names of properties whose values must never appear in dumps/JSON.
-     *
      * @return list<string>
      */
     abstract protected function secretKeys(): array;
@@ -62,7 +54,7 @@ trait RedactsSecrets
         try {
             return Config::log()->redactSecrets;
         } catch (Throwable) {
-            return true; // fail-safe: redact when the setting cannot be read
+            return true;
         }
     }
 }

@@ -4,21 +4,13 @@ declare(strict_types=1);
 
 namespace core;
 
+use core\tools\Directory;
+use core\tools\Silently;
 use RuntimeException;
 
 /**
- * Compiles framework files into single PHP bundles, so a request pays for
- * one require/stat/parse instead of dozens. Bundles are regenerated lazily
- * when missing.
- *
- * Source files are wrapped in bracketed namespace blocks; the result is
- * functionally equivalent to including each file directly.
- *
- * A missing bundle is the only rebuild trigger; bundles are never compared against their sources.
- * Edited core/, extensions/ or config/ files therefore stay invisible until the bundle file is
- * deleted, so a deployment MUST remove the bundle directory. A deployment that preserves it keeps
- * serving the previous release's framework code. Freshness is not checked at runtime because that
- * would mean stat-ing every source file on every request - the cost bundling exists to avoid.
+ * Bundles rebuild only when missing. Delete generated bundles on deployment;
+ * source changes are not checked at runtime.
  *
  * @internal
  */
@@ -100,15 +92,16 @@ final class Bundle
 
     private static function write(string $outFile, string $body): void
     {
+        Directory::ensure(dirname($outFile), 0o700, 'Bundle: cannot create bundle directory');
         $pid = getmypid();
         $tmp = $outFile . '.tmp.' . ($pid === false ? '0' : (string)$pid);
 
-        if (self::silent(static fn(): int|false => file_put_contents($tmp, $body, LOCK_EX)) === false) {
+        if (Silently::call(static fn(): int|false => file_put_contents($tmp, $body, LOCK_EX)) === false) {
             throw new RuntimeException("Bundle: cannot write temporary file: {$tmp}");
         }
 
-        if (!self::silent(static fn(): bool => rename($tmp, $outFile))) {
-            self::silent(static fn(): bool => unlink($tmp));
+        if (!Silently::call(static fn(): bool => rename($tmp, $outFile))) {
+            Silently::call(static fn(): bool => unlink($tmp));
             throw new RuntimeException("Bundle: cannot move bundle into place: {$outFile}");
         }
     }
@@ -119,26 +112,11 @@ final class Bundle
             throw new RuntimeException("Bundle: cannot read source file: {$file}");
         }
 
-        $src = self::silent(static fn(): string|false => file_get_contents($file));
+        $src = Silently::call(static fn(): string|false => file_get_contents($file));
         if ($src === false) {
             throw new RuntimeException("Bundle: cannot read source file: {$file}");
         }
 
         return $src;
-    }
-
-    /**
-     * @template T
-     * @param callable(): T $operation
-     * @return T
-     */
-    private static function silent(callable $operation): mixed
-    {
-        set_error_handler(static fn(): bool => true);
-        try {
-            return $operation();
-        } finally {
-            restore_error_handler();
-        }
     }
 }

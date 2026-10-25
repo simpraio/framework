@@ -31,6 +31,7 @@ final readonly class Database implements JsonSerializable
         public string $password,
         public string $charset,
         public array $options,
+        public DatabaseSsl $ssl = new DatabaseSsl(),
     ) {
     }
 
@@ -48,6 +49,7 @@ final readonly class Database implements JsonSerializable
             password: Cast::string($raw['password'] ?? null, 'database.password'),
             charset: Cast::string($raw['charset'] ?? null, 'database.charset', 'utf8mb4'),
             options: $options,
+            ssl: DatabaseSsl::fromArray(Map::section($raw, 'ssl')),
         );
     }
 }

@@ -66,16 +66,44 @@ $this->view->load(string $name): Template    // load templates/{name}.html
 $this->view->exists(string $name): bool      // check if a template file exists
 ```
 
-**Request methods** - read query/post input, headers, JSON bodies, files, cookies, client IP, and method information:
+**Request methods** - `$this->request` is a `core\http\Request`. Values are read as strings: an
+array submitted under a key (`tags[]=a`) reads as the default, never as an array.
 
+| Call | Returns | Description |
+| --- | --- | --- |
+| `method()` | `string` | The upper-cased method if it is one the framework handles (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`); any other method reads as `GET`. |
+| `rawMethod()` | `string` | The method exactly as the client sent it, upper-cased. Use it where an unknown method must not pass for `GET`. |
+| `isMethod($method)` | `bool` | Compares `method()` with `$method`, case-insensitively. |
+| `uri()` | `string` | The request target as received, with its query string; `/` when absent. |
+| `path()` | `string` | `uri()` without the query string or fragment. |
+| `query($key, $default = null)` | `?string` | A query-string value. |
+| `post($key, $default = null)` | `?string` | A form-body value. |
+| `input($key, $default = null)` | `?string` | The form-body value, or the query-string value when the body has none. |
+| `all()` | `array` | Form-body and query-string values together; the body wins on a shared key. |
+| `header($name, $default = null)` | `?string` | A request header by name, in any case; an empty header reads as `$default`. Covers `Content-Type` and `Content-Length`, which PHP stores outside the `HTTP_*` keys. |
+| `cookie($name, $default = null)` | `?string` | A cookie value. |
+| `file($key)` | `?array` | The `$_FILES` entry for `$key`, or `null`. It is not validated; check `error`, `size` and the type yourself. |
+| `ip()` | `string` | `REMOTE_ADDR`, or an empty string. Forwarding headers are not read: behind a proxy or load balancer this is the proxy's address. |
+| `isJson()` | `bool` | Whether `Content-Type` contains `application/json`. |
+| `json()` | `array` | The decoded JSON body, cached after the first successful decode. An empty body or a non-JSON `Content-Type` gives `[]`; a malformed body, or one that is not an object or array, throws `HttpException(400)` on every call. Nesting is limited by `project.max_json_depth`. |
+| `rawBody()` | `string` | The request body as received. |
+| `isSecure()` | `bool` | Whether `HTTPS` is set and not `off`, or the server port is 443. `X-Forwarded-Proto` is not read, so behind a TLS-terminating proxy this is `false` unless the server sets `HTTPS`. |
+| `isAjax()` | `bool` | Whether `X-Requested-With` is `XMLHttpRequest`. The header is client-supplied: use it to choose a response format, never for access control. |
+
+**The `Request` facade** - code outside a controller reaches the same request statically through
+`core\Request`, which the kernel initialises for every request:
+
+```php
+use core\Request;
+
+$page = Request::query('page', '1');
+$isPost = Request::isMethod('POST');
 ```
-$this->request->isMethod('POST'): bool
-$this->request->input('email'):  - string
-$this->request->all(): array
-$this->request->json(): array
-$this->request->header('Accept'):  - string
-$this->request->ip(): string
-```
+
+`core\Request` offers `method()`, `isMethod()`, `path()`, `uri()`, `query()`, `input()`, `all()`,
+`header()`, `cookie()`, `file()`, `ip()`, `isJson()`, `json()`, `rawBody()`, `isSecure()` and
+`isAjax()`, each behaving as in the table above, and `instance()`, which returns the
+`core\http\Request` itself for `post()` and `rawMethod()`.
 
 ```
 // conditional template loading
@@ -114,7 +142,7 @@ Response::redirect('/login');                  // 302 Found
 Response::redirect('/moved', 301);             // 301 Moved Permanently
 ```
 
-JSON is encoded with `JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`. If encoding fails, `null` is sent as the body.
+JSON is encoded with `JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`. Data JSON cannot carry - a string that is not valid UTF-8, `NAN` or `INF` - throws `JsonException`, which the error handler turns into a logged 500; convert legacy-encoded strings to UTF-8 before encoding them.
 
 You can also construct a response directly when you need full control over the Content-Type:
 
@@ -167,7 +195,7 @@ return Response::redirect('/login')
     ->clearCookie('session');
 ```
 
-Header names are normalized to `Title-Case` automatically - `'x-request-id'` and `'X-Request-Id'` refer to the same header. Header names or values containing CR, LF, or NUL throw `InvalidArgumentException`.
+Header names are normalized to `Title-Case` automatically - `'x-request-id'` and `'X-Request-Id'` refer to the same header. A name must be an RFC 9110 token - letters, digits and ``!#$%&'*+-.^_`|~`` - and a value must not contain CR, LF or NUL; anything else throws `InvalidArgumentException`. The HTTP client drops request headers that break the same rule, `core\http\HeaderField`.
 
 ## Redirects
 

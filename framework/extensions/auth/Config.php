@@ -6,6 +6,7 @@ namespace extensions\auth;
 
 use core\config\Cast;
 use core\config\Config as CoreConfig;
+use core\http\Url;
 use InvalidArgumentException;
 
 final readonly class Config
@@ -24,6 +25,7 @@ final readonly class Config
         public string $defaultPolicy,
         public string $guestRoute,
         public string $deniedRedirect,
+        public string $returnParam,
     ) {
     }
 
@@ -56,47 +58,19 @@ final readonly class Config
             defaultPolicy: in_array($policy, ['allow', 'deny'], strict: true) ? $policy : 'deny',
             guestRoute: self::redirectPath($guest),
             deniedRedirect: self::redirectPath($denied),
+            // Empty is the opt-out, and a meaningful one: the page a guest asked for ends up in
+            // the sign-in URL, so it reaches access logs and browser history. A project whose URLs
+            // carry anything sensitive in a query string turns this off rather than forking.
+            returnParam: Cast::string($raw['return_param'] ?? null, 'extensions.auth.return_param', 'return'),
         );
     }
 
     /**
-     * A configured route as the path to redirect to.
-     *
-     * A leading slash means the value is the path exactly as written, so a project whose
-     * canonical URLs carry no trailing slash can configure `/login` and get `/login`
-     * rather than a redirect to `/login/` that its own rewrite then sends back.
-     *
-     * A bare name denotes a route name and uses the `/name/` shape.
-     *
-     * Leading slashes and backslashes collapse, so the result always names a path on this
-     * site: `//host` is a protocol-relative URL naming another origin, and a browser reads
-     * the `/\host` form the same way, since it treats a backslash in a URL as a slash.
-     * ASCII controls and DEL are invalid because browsers normalize some of them before
-     * interpreting the URL.
-     *
-     * Public because {@see Auth::logout()} takes the same value as an argument, and a route
-     * given there has to mean what the configured one means.
-     *
      * @throws InvalidArgumentException
      */
     public static function redirectPath(string $configured): string
     {
-        if (preg_match('/[\x00-\x1F\x7F]/', $configured) === 1) {
-            throw new InvalidArgumentException('INVALID_AUTH_REDIRECT_PATH');
-        }
-
-        $value = trim(string: $configured, characters: ' ');
-        $segments = trim(string: $value, characters: "/\\");
-
-        if ($segments === '') {
-            return '/';
-        }
-
-        if (!str_starts_with($value, '/')) {
-            return '/' . $segments . '/';
-        }
-
-        return '/' . $segments . (str_ends_with($value, '/') ? '/' : '');
+        return Url::configuredPath($configured, 'INVALID_AUTH_REDIRECT_PATH');
     }
 
     public static function enabled(): self

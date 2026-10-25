@@ -69,5 +69,16 @@ return [
     //     'username' => 'framework_user',
     //     'password' => 'change-me',
     //     'charset' => 'utf8mb4',
+    //
+    //     // Request verified TLS for network connections.
+    //     'ssl' => [
+    //         'ca' => '/etc/ssl/certs/mysql-ca.pem',
+    //         // Client certificate authentication: both of these, or neither.
+    //         'cert' => '',
+    //         'key' => '',
+    //         // Leave true. False still encrypts, but authenticates nobody, so
+    //         // whatever answers on the port can read the traffic.
+    //         'verify_server_cert' => true,
+    //     ],
     // ],
 ];

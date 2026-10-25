@@ -25,10 +25,10 @@ final class Boot extends ExtensionBoot implements Hook, Contributor
         $pathId = $route->pathId();
 
         if (!Access::isControlled($pathId)) {
-            return $config->defaultPolicy === 'deny' ? $this->deny($config) : null;
+            return $config->defaultPolicy === 'deny' ? $this->deny($config, $request) : null;
         }
 
-        return Access::allowedPath($pathId) ? null : $this->deny($config);
+        return Access::allowedPath($pathId) ? null : $this->deny($config, $request);
     }
 
     public function after(Request $request, Route $route, Response $response): void
@@ -46,23 +46,34 @@ final class Boot extends ExtensionBoot implements Hook, Contributor
                 'USER_ID' => User::isAuthenticated() ? (string)User::id() : null,
                 'USER_GROUP' => User::group(),
             ]),
-            'blocks' => [
+            // array_replace, not a spread: a numeric block name keeps its key, and a configured
+            // block named like these two cannot override them.
+            'blocks' => array_replace(Access::pathBlocks($route->pathId()), [
                 'IsAuthenticated' => User::isAuthenticated(),
                 'IsGuest' => User::isGuest(),
-                ...Access::pathBlocks($route->pathId()),
-            ],
+            ]),
         ];
     }
 
-    private function deny(Config $config): Response
+    private function deny(Config $config, Request $request): Response
     {
-        $target = User::isGuest() ? $config->guestRoute : $config->deniedRedirect;
+        // Only a guest carries a target. Someone signed in who lacks the rights is not going to
+        // gain them by signing in again, so sending them onward would be a loop with a detour.
+        if (!User::isGuest()) {
+            if ($config->deniedRedirect === '/') {
+                throw new HttpException(403);
+            }
 
-        if ($target !== '/') {
-            return Response::redirect($target);
+            return Response::redirect($config->deniedRedirect);
         }
 
-        throw new HttpException(403);
+        if ($config->guestRoute === '/') {
+            throw new HttpException(403);
+        }
+
+        return Response::redirect(
+            GuestReturn::append($config->guestRoute, $request->uri(), $config->returnParam, $request->rawMethod()),
+        );
     }
 
     private function config(): Config

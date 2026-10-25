@@ -18,10 +18,17 @@ final class Body
             return [];
         }
 
-        return [
+        $curl = [
             CURLOPT_POSTFIELDS => $options->raw || is_string($options->data)
                 ? $options->data
                 : http_build_query(is_array($options->data) ? $options->data : []),
         ];
+
+        // CURLOPT_POSTFIELDS selects POST unless the requested method is set explicitly.
+        if ($options->method !== 'POST') {
+            $curl[CURLOPT_CUSTOMREQUEST] = $options->method;
+        }
+
+        return $curl;
     }
 }

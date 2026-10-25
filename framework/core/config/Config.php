@@ -98,7 +98,7 @@ final class Config
 
         $missing = array_filter(
             ['database.driver', 'database.hostname', 'database.database', 'database.username', 'database.password'],
-            static fn(string $path): bool => !self::hasPath(self::$compiled, $path),
+            static fn(string $path): bool => !Map::hasPath(self::$compiled, $path),
         );
 
         if ($missing !== []) {
@@ -119,9 +119,6 @@ final class Config
     }
 
     /**
-     * Raw access to an extension's config section. Used by extension classes
-     * to hydrate their own DTOs.
-     *
      * @return array<string, mixed>
      */
     public static function extension(string $name): array
@@ -170,19 +167,5 @@ final class Config
     {
         /** @var array<string, mixed> */
         return self::$compiled[$name] ?? [];
-    }
-
-    /** @param array<string, mixed> $config */
-    private static function hasPath(array $config, string $path): bool
-    {
-        $value = $config;
-        foreach (explode('.', $path) as $key) {
-            if (!is_array($value) || !array_key_exists($key, $value)) {
-                return false;
-            }
-            /** @var mixed $value */
-            $value = $value[$key];
-        }
-        return true;
     }
 }

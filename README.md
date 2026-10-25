@@ -1,4 +1,4 @@
-# Simpra Framework
+# Simpra PHP Framework
 
 ![CI](https://github.com/simpraio/framework/actions/workflows/ci.yml/badge.svg)
 ![PHP](https://img.shields.io/badge/php-8.4%2B-777BB4?logo=php)
@@ -15,6 +15,22 @@ All paths in this README and in `docs/` are written from the application root, m
 Simpra is deliberately small. It accepts some coupling and avoids patterns like dependency injection containers, reflection, auto-wiring, service providers, and attribute routing because the target is simple projects where clarity and speed matter more than framework extensibility.
 
 This is not missing architecture. It is smaller architecture on purpose. See [docs/00-Philosophy.md](docs/00-Philosophy.md) for the full design rationale.
+
+## Working With AI Coding Tools
+
+The same choices that keep Simpra readable for people make it easy to hand to an AI coding assistant such as Claude, Copilot or Codex.
+
+**It fits in the context.** `core/` is 65 files and about 5,400 lines; with every bundled extension it is 169 files and about 12,400 lines. At the common estimate of four bytes per token, that is roughly 40,000 tokens for the core and 90,000 with all extensions. Either fits in a 200,000-token context window, the size current Claude models offer, with room left for your application. There is no `vendor/` directory behind it: the framework has no dependencies, so nothing it relies on is out of the assistant's sight.
+
+**Nothing is wired in secret.** The kernel wires its internal container explicitly; there is no autowiring, application container configuration, service provider or attribute routing to trace. A URL `/{module}/{controller}/{id?}` is served by `modules/{module}/{Controller}.php` and `templates/{module}/{controller}.html`. Templates are plain HTML with `{TOKEN}` placeholders and `{Block}...{-Block}` sections, not a template language. An assistant can find what runs by opening the files the URL names.
+
+**The rules are written down.** [AGENTS.md](AGENTS.md) is a handbook for AI coding agents. It says where code goes, what the framework must not become, how comments and commits are written, and what a change must be tested with: risk tiers L0-L3 and rules R1-R7, from "failing test first" to "tests never bend the framework". Copy `AGENTS.md` into your project unchanged, as it asks, and keep project facts in your own files. For Claude Code, add a `CLAUDE.md` holding the single line `@AGENTS.md`: it imports the handbook, so the assistant reads the same rules and the two cannot drift apart.
+
+**The checks are one command each.** An assistant can verify its own work: `mago lint` and `mago analyze` check style and types against the committed `mago.toml`, the same commands CI runs.
+
+**Upgrades come with a prompt.** [UPGRADING.md](UPGRADING.md) opens with a prompt to give an assistant so it applies the version steps to your project without touching secrets or unrelated code.
+
+None of this makes generated code correct by itself. Review the diff and run the checks, as you would for a human contributor.
 
 ## Requirements
 
@@ -128,6 +144,7 @@ Most extensions are disabled by default. Enable only what your app actually uses
 - Error Log: DB-backed exception sink
 - Events: synchronous in-process events
 - Flash: one-request session messages and safe form errors
+- OIDC Login: Microsoft and Google sign-in, optional tenant/group/domain restrictions
 - HTTP Client: curl wrapper with policy controls
 - Mail: native or SMTP transport
 - Profiler: request timing for development

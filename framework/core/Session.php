@@ -8,6 +8,9 @@ use core\session\Store;
 
 final class Session
 {
+    /** Where the CSRF token lives; rotate() drops it so a token issued before sign-in dies with that session. */
+    public const string CSRF_KEY = '_csrf_token';
+
     private static Store $store;
 
     public static function init(Store $store): void
@@ -44,6 +47,13 @@ final class Session
     public static function regenerate(bool $deleteOld = true): void
     {
         self::$store->regenerate($deleteOld);
+    }
+
+    /** Call on sign-in or any other gain in privilege: a new session ID, the old one invalidated, and a fresh CSRF token. */
+    public static function rotate(): void
+    {
+        self::$store->regenerate();
+        self::$store->forget(self::CSRF_KEY);
     }
 
     public static function destroy(): void

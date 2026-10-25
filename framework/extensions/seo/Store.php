@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace extensions\seo;
 
-use core\cache\Cache;
+use core\cache\Optional;
 use core\db\Db;
 use core\http\Route;
-use Throwable;
 
 final class Store
 {
@@ -19,30 +18,28 @@ final class Store
         $pathId = $route->pathId();
         $key = "seo.{$pathId}.{$route->language}";
 
-        try {
-            return Cache::remember(
-                $key,
-                static fn(): array => self::row(
-                    Db::row(
-                        '
-                        SELECT
-                            `title`, `description`, `canonical_url`
-                        FROM
-                            `seo`
-                        WHERE
-                            `path_id` = :path_id AND
-                            `language` = :language',
-                        [
-                            'path_id' => $pathId,
-                            'language' => $route->language,
-                        ]
-                    )
-                ),
-                $config->cacheTtl,
-            );
-        } catch (Throwable) {
-            return self::empty();
-        }
+        return Optional::remember(
+            $key,
+            static fn(): array => self::row(
+                Db::row(
+                    '
+                    SELECT
+                        `title`, `description`, `canonical_url`
+                    FROM
+                        `seo`
+                    WHERE
+                        `path_id` = :path_id AND
+                        `language` = :language',
+                    [
+                        'path_id' => $pathId,
+                        'language' => $route->language,
+                    ]
+                )
+            ),
+            $config->cacheTtl,
+            self::empty(),
+            'SEO fields unavailable; rendering without them',
+        );
     }
 
     /**

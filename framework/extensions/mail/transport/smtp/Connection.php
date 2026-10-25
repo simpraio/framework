@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace extensions\mail\transport\smtp;
 
+use core\tools\Silently;
 use RuntimeException;
+use SensitiveParameter;
 
 final class Connection
 {
-    /**
-     * TLS verification policy for implicit TLS and STARTTLS. Keep all checks strict.
-     */
     private const array TLS_CONTEXT = [
         'verify_peer' => true,
         'verify_peer_name' => true,
@@ -36,9 +35,7 @@ final class Connection
             error_message: $error,
             timeout: $config->timeout,
             context: stream_context_create([
-                // Pin peer_name explicitly: on the STARTTLS path the socket opens as plain
-                // TCP (no ssl:// address), so stream_socket_enable_crypto() has no host to
-                // derive the expected certificate name from unless we set it here.
+        // STARTTLS starts on plain TCP, so certificate verification needs an explicit peer name.
                 'ssl' => [...self::TLS_CONTEXT, 'peer_name' => $config->host],
             ]),
         );
@@ -52,7 +49,11 @@ final class Connection
         return new self($config->timeout, $socket);
     }
 
-    public function write(string $data): void
+    /**
+     * Commands and credentials alike, so the data stays out of traces: a failed write is reported
+     * by fwrite's return value, never by a notice that would carry it.
+     */
+    public function write(#[SensitiveParameter] string $data): void
     {
         $socket = $this->stream();
 
@@ -60,7 +61,7 @@ final class Connection
         $written = 0;
 
         while ($written < $length) {
-            $result = fwrite($socket, substr($data, $written));
+            $result = Silently::call(static fn(): int|false => fwrite($socket, substr($data, $written)));
 
             if ($result === false || $result === 0) {
                 throw new RuntimeException('SMTP_WRITE_FAILED');

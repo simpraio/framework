@@ -45,7 +45,8 @@ final class Page
 
         $isBug = $status >= 500;
         $url = is_string($_SERVER['REQUEST_URI'] ?? null) ? $_SERVER['REQUEST_URI'] : '/';
-        $exposeDetails = $this->debug || !$isBug;
+        // A project's own error.html may print these anywhere, so production leaves them empty.
+        $exposeDetails = $this->debug;
 
         return $this->view->load('error')
             ->tokens([

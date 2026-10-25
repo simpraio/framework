@@ -15,6 +15,10 @@ final readonly class Files
     }
 
     /**
+     * A flattened project keeps framework.local.php in config/; it and its variants such as
+     * framework.local.example.php are local configuration, never defaults, so they are not
+     * compiled into the bundle.
+     *
      * @return list<string> absolute paths to all framework default config files
      */
     public function configFiles(): array
@@ -23,9 +27,10 @@ final readonly class Files
         if ($found === false) {
             return [];
         }
-        // Sort for a deterministic merge order: glob() order is filesystem-dependent,
-        // so two files defining the same key could otherwise resolve differently across
-        // OS/filesystems (e.g. Windows dev vs Linux prod).
+        $found = array_filter(
+            $found,
+            static fn(string $path): bool => preg_match('/^framework\.local(\..+)?\.php$/', basename($path)) !== 1,
+        );
         sort($found);
         return array_values($found);
     }

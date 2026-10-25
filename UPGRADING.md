@@ -61,6 +61,245 @@ and smoke-test staging with `project.debug = false`.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 
+## 5.1.1 -> 5.2.0
+
+**Impact:** one new optional extension and one new configuration section, plus several
+behaviour changes that alter what reaches your servers and your database. A `GET` carrying
+data is now sent as a `GET` instead of silently as a `POST`; rate-limit counters are
+separated per policy, so effective limits change; redirect targets are resolved by RFC 3986
+section 5, and twelve of that specification's forty examples previously resolved to a
+different resource; and database work after a transaction level the framework could not
+clean up is refused rather than carried out outside the transaction. A flattened project's
+local configuration file is no longer compiled into the config bundle, which earlier releases
+wrote out in plaintext. Auth rules and group status apply on the next request, a disabled
+group keeps its denials, and a template block not granted to the user is hidden. There are no
+schema changes. Read the three Required steps before deploying: the first change is silent,
+and the other two concern credentials.
+
+### Required
+
+1. Review all `HttpClient::get()` calls, plus `HttpClient::request()` calls that explicitly
+   select `GET`. Check those that set `data` or enable `raw`, including options
+   assembled elsewhere. These options could previously make a `GET` arrive at the server
+   as a `POST`: `CURLOPT_POSTFIELDS` makes cURL change the method on its own,
+   and nothing here said otherwise. The verb is now stated explicitly, so
+   the request is sent as a `GET`. **The payload does not move** - it stays in the request
+   body, so the server now receives a `GET` carrying a body. Decide per call site: if the
+   endpoint expected the `POST` it was in fact receiving, change the call to
+   `HttpClient::post()`; if a real `GET` was intended, put the parameters in the URL query
+   string, because most servers do not parse a `GET` body. Nothing reports this change - the
+   call keeps succeeding and reaches a different handler, or none. `HttpClient::post()` is
+   unchanged.
+2. Delete the compiled config bundle after upgrading - `cache/config.php`, or `config.php`
+   in `SIMPRA_BUNDLE_DIR`. The Manual Procedure already asks for this on every upgrade; this
+   release makes it a security step. In a flattened project, where `framework.local.php`
+   sits in `config/`, earlier releases compiled that file into the bundle, so the bundle
+   holds a plaintext copy of the credentials set there: the database password, `crypt_key`,
+   and any extension secret. The fixed loader no longer writes them, but an existing bundle
+   is still read until it is removed - and with it any override you have since deleted from
+   the local file. Treat copies of the old bundle (backups, deployment artifacts, other
+   hosts) as holding those credentials, and rotate them if such copies exist outside your
+   control. A framework checkout, whose local file sits beside `framework/`, was not
+   affected.
+3. If `log.redact_keys` is set, check the log files written before this upgrade. Earlier
+   releases never applied those keys to the log file, so every value logged under one of them
+   was written in the clear. Purge or restrict the old files if they hold secrets or personal
+   data, and rotate any credential that reached them.
+
+### Conditional
+
+1. If `extensions.ratelimit` is enabled, expect different effective limits. Counters were
+   keyed on the caller's address alone, so every budget in the application shared one
+   counter and one expiry: the per-request application-wide check and a controller's own
+   limit spent each other's allowance, and whichever ran first fixed the expiry for both.
+   The key now covers `$max` and `$window` as well, and `Limiter::exceeded()` takes an
+   optional fourth `$scope` argument to separate policies that differ only in where they are
+   applied. Two consequences: budgets that were being drained by unrelated checks now have
+   their own, so the application admits more requests than it did; and the new key orphans
+   the counters already in the cache, so every limit starts from zero on deploy. Call sites
+   sharing a `$max` and `$window` still share a counter unless you give them distinct
+   `$scope` values. The existing three-argument call remains valid.
+2. If application code catches an exception raised inside a `Db::transaction()` callback and
+   then performs further database work, that work may now be refused with
+   `RuntimeException('Database transaction is aborted')`. This applies when the framework
+   could not undo the failed level - a `ROLLBACK TO SAVEPOINT` that itself failed - or when
+   the backend ended the transaction on its own, as a deadlock does. Every enclosing
+   callback stays blocked until it exits; a later operation outside those callbacks may
+   reconnect. An inner level whose rollback **succeeds** does not block the outer level,
+   which can still commit: catching an inner failure remains a supported pattern.
+   Previously such code reconnected and continued outside any transaction, committing
+   each subsequent statement on its own.
+3. If you connect to MySQL over a network you do not control, configure TLS with the new
+   `database.ssl` section - `ca`, `cert`, `key` and `verify_server_cert`. A CA or a client
+   certificate/key pair requests TLS; an absent or empty section requests none, so existing
+   deployments are unchanged. `cert` and `key` must be supplied together; otherwise database
+   configuration is rejected when first used. The database connection is lazy, so this need
+   not happen during boot. `verify_server_cert` defaults to true; configure the issuing CA
+   rather than turning
+   verification off. Framework configuration previously could not enable database TLS:
+   SSL attributes are integer constants and `database.options` reaches the driver with
+   string keys only, so a CA path put there was dropped and the connection stayed in the
+   clear. If you did that, move it to `database.ssl` and confirm the connection is now
+   encrypted. See
+   [Database](docs/07-Database.md).
+4. If an allowlisted outbound host resolves into the NAT64 well-known prefix
+   `64:ff9b::/96`, the egress guard now judges it by the IPv4 address in its low 32 bits
+   rather than by the prefix's own IANA attribute. `64:ff9b::808:808` stays reachable
+   because `8.8.8.8` is; `64:ff9b::a9fe:a9fe` is refused because `169.254.169.254` is. A
+   legitimate NAT64 path to a globally routable address is unaffected.
+5. If application code relies on `extensions\validation` accepting values it should not,
+   check those paths. An integer too large for the platform type is refused instead of
+   saturating to `PHP_INT_MAX`; float validation refuses overflow and non-finite values
+   (`NAN` previously bypassed both bounds); a date containing a NUL byte
+   is a validation failure rather than an uncaught `ValueError` and a 500; and `int()` and
+   `uuid()` refuse a value ending in a line feed, which they accepted - `uuid()` returned it
+   with the newline still attached. Trim input first if a trailing newline is expected,
+   for example from a textarea.
+6. If `extensions.auth` is enabled and a login upgrades a low-cost bcrypt hash, a concurrent
+   password reset, account deletion, or rehash can now make that login return `false`.
+   The update matches the original hash in its `WHERE` clause, preventing a stale rehash
+   from overwriting a newer credential. A retry may succeed after another login's rehash;
+   after a password reset, the user must provide the new password. Stronger bcrypt costs
+   and Argon2 hashes are left alone. Without a rehash, credential changes are detected at
+   the next request-driven session revalidation, not immediately. See
+   [Auth](docs/11-Extensions-Auth.md).
+7. If you need a redirect not to be followed, `follow_redirects` is now a per-request HTTP
+   client option. It defaults to true, which is the previous behaviour.
+8. If you want Microsoft or Google sign-in, enable the new optional `oidc-login` extension.
+   It needs no schema. Pass the page that sent the user to log in
+   as the second argument of `Login::start()`, and a successful sign-in returns them there
+   instead of to `success_redirect`; a value that is not a path on this site is ignored. See
+   [OIDC Login](docs/18-Extensions-OIDC-Login.md) for setup and provider registration.
+9. If `extensions.auth` is enabled, a guest turned away from a protected page is now
+   redirected to `guest_route` with `?return=<the page they asked for>` rather than to
+   `guest_route` alone - for a `GET` or `HEAD` request only; a refused `POST`, `PUT`,
+   `PATCH` or `DELETE` still goes to `guest_route` with no target, because signing in
+   would send the user back with a `GET`. Nothing breaks if your login form ignores it.
+   To use it, read `return` and send the user there after a successful sign-in - validate
+   it first, or pass it to `core\http\Url::isLocal()`, because it arrives from the
+   query string. To switch it off, set `extensions.auth.return_param` to an empty string; do
+   consider that if your URLs carry anything sensitive in a query string, since the target
+   now appears in the sign-in URL and therefore in access logs and browser history. If you
+   also use `oidc-login`, confirm its callback route has a guest rule: a refused callback is
+   carried like any other page, and its provider `code` and `state` would land in the
+   sign-in URL. Someone already signed in who is refused is unaffected: they still go to
+   `denied_redirect` with no target, because signing in again would not grant them the page.
+10. If you pass `extensions\http_client\HttpClient` a URL with credentials in it -
+    `https://user:secret@host/` - it is now refused with `HTTP client URL rejected` before
+    anything is sent. Move the credentials into an `Authorization` header in the request's
+    `headers` option. A URL containing a space, a control byte or a backslash, or with a
+    percent-encoded host, is refused too; encode the space as `%20`, and use `/` rather than
+    `\`. A redirect to such a URL is refused as well, even with the egress guard off.
+11. If `project.allowed_hosts` is set and something in front of your application rewrites the
+    `Host` header, check it still sends a plain `host[:port]`. The guard now refuses a value with user information, a path or a
+    query, which it previously judged by the host part alone, and answers 400.
+12. If you set response headers with unusual names, check them: `Response::header()` now
+    accepts only an RFC 9110 token as a name - letters, digits and ``!#$%&'*+-.^_`|~`` - and
+    throws `InvalidArgumentException` for a space, a non-ASCII character or anything else it
+    previously let through. A name or value in `extensions.security.headers` that breaks the
+    rule is a config error naming the key, raised when the extension map is rebuilt after the
+    bundle is cleared and whenever the security config is first read; fix it before deploying.
+    The HTTP client drops a request header that breaks the rule, as it did for CR and LF; that
+    now also covers a value containing a NUL byte, which cURL used to cut the value short at,
+    and a name ending in a line feed.
+13. If you call `HttpClient::request()` with a `method` outside `GET`, `POST`, `PUT`, `PATCH`,
+    `DELETE`, `HEAD` and `OPTIONS` - `TRACE`, a WebDAV verb, a typo - it now throws
+    `HttpClientException('HTTP client method rejected')`. It was sent as a `GET`, which is a
+    different request from the one asked for and may have succeeded against the wrong
+    handler. Leaving `method` out, or passing `null` or an empty string, means `POST` when
+    `data` is set and `GET` when it is not; an empty string with `data` is therefore sent as
+    the `POST` that earlier releases put on the wire, not as a `GET` carrying a body. The
+    case of a valid method does not matter.
+14. If `extensions.error-log` is enabled and `log.redact_keys` is set, the URLs it stores now
+    have query parameters with those names redacted as well as the ones in its own
+    `redact_keys`. `log.redact_keys` names the log-context keys your project treats as
+    secret, and the same names in a stored query string are now treated the same way. A
+    generic name there, such as `id`, also hides `?id=` values in stored URLs; move it to a
+    more specific key if you need those for debugging. Rows already stored are unchanged.
+15. If application code reads the Microsoft membership's raw group list, expect lowercase,
+    unique, non-empty IDs, including lists restored from a session. Unknown membership still
+    differs from a known empty list; authorization policy is unchanged.
+16. If automation invokes `tests/integration/battery.php`, use `php tests/run_all.php`
+    instead. Its assertions now run in the owning suites. Remove invocations of the obsolete
+    `tools/bench/pipeline.php`; `tools/bench/http.php` remains a reporting-only benchmark.
+17. If application code reaches into HTTP client internals, replace
+    `curl\Options::normalize($options)` with `new curl\RequestOptions($options)`.
+    `curl\Policy` and the validation extension's internal `NumberRules`, `TextRules`,
+    `ChoiceRules` and `FormatRules` classes were removed. Use the documented HTTP client
+    and `Validator` entry points rather than these implementation helpers.
+18. If a JSON endpoint can return strings that are not valid UTF-8 - typically values read
+    from a latin1 table or a legacy file - convert them before calling `Response::json()`.
+    It now throws `JsonException`, which becomes a logged 500, where it used to answer 200
+    with the body `null` and lose the whole response. `NAN` and `INF` throw too.
+19. If `extensions.ratelimit` is enabled, requests that `auth` redirects or `csrf` rejects now
+    count against the budget, since rate limiting runs first. A page that sends signed-out
+    visitors round a redirect, or a form that fails CSRF often, spends more of it than before.
+    If you wrote an extension whose hook depends on running before or after another, declare
+    `public const int PRIORITY` on its `Boot` class: lower runs first, the default is `0`.
+20. If `project.allowed_hosts` is set, check it is a list - a single host written as a string,
+    or `null`, used to switch the check off silently and is now a config error - and that every entry is a
+    host name alone. An entry with a
+    port (`example.com:8443`), a path, a wildcard or a Unicode name now stops the boot with a
+    config error. None of them ever matched - the port is not compared - so drop the port,
+    list subdomains one by one, and write internationalised names in their `xn--` form.
+21. If you use block rules in `auth_access`, a block configured for a path and not granted to the
+    current user is now hidden. It used to be rendered, contents included, for everyone without
+    a matching rule. Check the pages whose users relied on seeing such blocks, and add the grants
+    they should have.
+22. If auth groups are marked `disabled`, their grants stop applying and their denials still
+    apply. Their users fall back to user-specific rules with `group_id = 0` and global rules;
+    review those before deploying.
+23. If you send mail over SMTP with a password, it is no longer trimmed. Remove whitespace from
+    the configured password only if it is not part of the real credential.
+24. If `extensions.auth` is enabled, login throttling checks the file-counter directory even
+    when APCu is enabled. On POSIX, check that `simpra-auth-rl` under the workers' temp directory
+    is not a link, not writable by group or others, and owned by the account PHP runs as where
+    ownership checks are available. Otherwise login checks fail with
+    `AUTH_RATE_LIMIT_DIRECTORY_NOT_PRIVATE`, not necessarily during boot. Windows skips these
+    checks; configure restrictive ACLs there. Arrange counter retention as
+    described in [Auth](docs/11-Extensions-Auth.md#counter-retention); the maintenance tool is
+    not vendored, so copy `tools/prune-auth-counters.php` from the framework to the host.
+25. If you call `Validator::uuid()` with a version, it must be 1-8; any other value now throws
+    `InvalidArgumentException` where it used to match the wrong UUIDs.
+
+### Good to know
+
+Stack traces no longer show call arguments, in the log or on debug pages: the error handler
+sets `zend.exception_ignore_args`. Frames, files and lines are unchanged. To see argument values
+while debugging locally, set it back to `0` after the kernel boots.
+
+A deprecation no longer ends the request. `E_DEPRECATED` and `E_USER_DEPRECATED` are logged
+at warning level and execution continues; every other severity in the mask still stops the
+request. A routine PHP upgrade now leaves notes in the log rather than taking pages down, so
+expect new warning lines the first time you move PHP versions - they were previously 500s.
+
+Redirect resolution moved into `extensions\http_client\Reference`, with section 5.2.4's
+algorithm in `extensions\http_client\DotSegments`, leaving `Redirect` to decide only whether
+a response redirects. `Redirect::target()` keeps its signature; only its answers change, and
+only where they were wrong. Among the corrections: a trailing slash was dropped, so `g/`,
+`.` and `..` all named a resource one level up from the right one; dot segments survived in
+an absolute-path reference, so `/./g` was requested literally; a repeated slash was
+collapsed, and `/a//b` is not `/a/b`; a fragment was read as part of the path, so
+`g#s/../x` followed to `/x`; and a reference with no path took the base's directory instead
+of its path, so `?page=2` returned from `/reports/list` requested `/reports`.
+
+A database failure while the route-alias map is cold is no longer cached. `Aliases` returned
+an empty map on error, which `Cache::remember()` then stored for the full TTL - an hour by
+default - so a database unreachable for one second answered "this site has no aliases" long
+after it recovered. The failure now propagates, nothing is cached, the next request retries,
+and the error is logged where both catches were previously silent.
+
+Reading a malformed JSON body twice now fails the same way twice. `Request::json()` marked
+the body parsed before decoding it, so a second read returned an uninitialised-property
+`Error` in place of the refusal.
+
+`core\http\Url` is new and is where URL and path handling lives: `path()`, `isLocal()`,
+`configuredPath()`, `parse()` and `host()`. If your own code calls `parse_url()` to judge a
+URL - to check a scheme, compare origins or extract a host - `Url::parse()` gives the same
+answer the framework uses, and refuses the inputs two parsers could read differently.
+`extensions\auth\Config::redirectPath()` delegates to `Url::configuredPath()`; configured
+values behave as before.
+
 ## 5.1.0 -> 5.1.1
 
 **Impact:** none for most applications. Replace the framework files; there are no

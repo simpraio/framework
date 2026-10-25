@@ -50,17 +50,28 @@ final class Auth
             return false;
         }
 
-        // Bind the session to the credential it was issued for, so a later password change or
-        // reset invalidates it on the next revalidation (see State::revalidated). Derived before
-        // the hash is dropped; only the digest is stored, never the hash.
-        $user['credential_fingerprint'] = State::credentialFingerprint($passwordHash);
-        unset($user['password']);
-        $user['last_validated_at'] = time();
+        // Algorithm changes need an explicit policy; only raise an existing bcrypt cost here.
+        $passwordInfo = password_get_info($passwordHash);
+        if ($passwordInfo['algo'] === PASSWORD_BCRYPT
+            && (int)($passwordInfo['options']['cost'] ?? 0) < PASSWORD_BCRYPT_DEFAULT_COST
+        ) {
+            $newHash = password_hash($password, PASSWORD_BCRYPT);
+            // Never overwrite a reset or another login's rehash with a stale credential.
+            $updated = Db::execute(
+                'UPDATE `auth_user` SET `password` = :password WHERE `user_id` = :user_id AND `password` = :original_password',
+                ['password' => $newHash, 'user_id' => (int)$user['user_id'], 'original_password' => $passwordHash],
+            );
+            if ($updated === 0) {
+                return false;
+            }
+            $passwordHash = $newHash;
+        }
+
+        $user = State::sessionPayload($user, $passwordHash);
 
         $sessionKey = $config->sessionKey;
 
-        Session::regenerate();
-        Session::forget('_csrf_token');
+        Session::rotate();
         Session::set($sessionKey, $user);
         User::set($user);
 

@@ -10,10 +10,6 @@ use core\config\Map;
 final readonly class Log
 {
     /**
-     * Accepted log levels, in the spelling core\log\Writer indexes by. Listed here rather than
-     * imported so the config layer stays independent of the logger it configures; the Writer
-     * tolerates an unknown level, so the two can never wedge each other.
-     *
      * @var non-empty-list<string>
      */
     private const array LEVELS = ['debug', 'info', 'warning', 'error'];

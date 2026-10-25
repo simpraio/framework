@@ -6,8 +6,8 @@ return [
     'extensions' => [
         'ratelimit' => [
             'enabled' => false,
-            'max'     => 60,   // requests allowed per window
-            'window'  => 60,   // window size in seconds
+            'max'     => 60,
+            'window'  => 60,
         ],
     ],
 ];

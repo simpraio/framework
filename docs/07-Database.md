@@ -2,6 +2,15 @@
 
 `core\db\Db` is a static facade over a PDO connection. It is initialized by the framework kernel and available anywhere in your application.
 
+For remote MySQL servers, configure verified TLS using
+[`database.ssl`](02-Configuration.md#database) in local configuration.
+
+From a framework checkout on Linux/WSL, `bash tools/test-mysql-tls.sh` verifies real
+TLS handshakes and transaction recovery using disposable, loopback-only MariaDB
+instances and test certificates. It requires MariaDB server/client tools, OpenSSL, and
+PHP with `pdo_mysql`, and does not alter an existing database. Pass `php tests/run_all.php`
+after the script name to run the full suite with this fixture available.
+
 ## Raw queries
 
 ```php
@@ -110,6 +119,11 @@ $result = Db::transaction(function () use ($fromId, $toId, $amount): bool {
 ```
 
 Throws on error and rolls back automatically. The callback's return value is passed through.
+
+Nested calls use savepoints. If rollback fails or the backend ends the whole transaction,
+all enclosing callbacks are aborted: further database operations and commit are refused,
+even if an inner exception is caught. Reconnection is allowed after those callbacks exit.
+Retry the whole transaction from outside it, not just the last statement.
 
 ## Advisory locks
 

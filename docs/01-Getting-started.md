@@ -110,7 +110,7 @@ return [
 ];
 ```
 
-`'debug' => true` exposes stack traces and internal state - it must be `false` in production; see [Security: Error Exposure](25-Security.md#error-exposure). `allowed_hosts` restricts which Host headers the framework accepts; set it to your actual domain in production to prevent host header injection. See [Security: Host Header Validation](25-Security.md#host-header-validation).
+`'debug' => true` exposes stack traces and internal state - it must be `false` in production; see [Security: Error Exposure](26-Security.md#error-exposure). `allowed_hosts` restricts which Host headers the framework accepts; set it to your actual domain in production to prevent host header injection. See [Security: Host Header Validation](26-Security.md#host-header-validation).
 
 ## Database Is Optional
 

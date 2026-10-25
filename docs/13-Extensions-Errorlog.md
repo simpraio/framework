@@ -11,7 +11,7 @@ return [
             'enabled'        => true,
             'retention_days' => 30,          // auto-delete entries older than N days
             'store_trace'    => true,          // persist full stack traces
-            'redact_keys'    => [],            // query-param names to redact in stored URLs
+            'redact_keys'    => [],            // query-param names to redact in stored URLs, besides log.redact_keys
         ],
     ],
 ];
@@ -50,7 +50,7 @@ CREATE TABLE `error_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-`exception` stores the fully-qualified class name of the thrown exception. `trace` is empty when `store_trace` is `false`. `url` has sensitive query parameters scrubbed according to `redact_keys`. The index on `created_at` supports the daily purge query.
+`exception` stores the fully-qualified class name of the thrown exception. `trace` is empty when `store_trace` is `false`. `url` has sensitive query parameters scrubbed: every name in `log.redact_keys` and in this extension's `redact_keys`, case-insensitively, whether written literally or in a form PHP reads as that name (`token%00x`, `token[a]`, ` token`), so a name the project lists as secret for log context is not stored in a query string either. The index on `created_at` supports the daily purge query.
 
 ## Example
 

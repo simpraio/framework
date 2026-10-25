@@ -128,9 +128,7 @@ final class Db
     }
 
     /**
-     * Returns the number of rows matched by the WHERE clause (not just rows whose
-     * values changed) — the connection sets the PDO MySQL FOUND_ROWS option so a "matched but
-     * unchanged" update reports >0 rather than being indistinguishable from "no match".
+     * Returns matched rows, not changed rows.
      *
      * @param array<string, mixed> $data
      * @param array<string, mixed> $where
@@ -209,13 +207,7 @@ final class Db
     }
 
     /**
-     * Build a WHERE fragment and its positional params from an equality map, keeping
-     * SQL and bindings in lock-step so callers can never pass mismatched parameters.
-     *
-     *   null         => `col` IS NULL          (no placeholder)
-     *   non-empty [] => `col` IN (?, ?, ...)   (one placeholder per element)
-     *   empty []     => 1 = 0                  (matches nothing; IN () is invalid SQL)
-     *   scalar       => `col` = ?              (one placeholder)
+     * Null means IS NULL; arrays mean IN; an empty array matches nothing.
      *
      * @param array<string, mixed> $where
      * @return array{0: string, 1: list<mixed>}
@@ -253,7 +245,7 @@ final class Db
 
     private static function ident(string $name): string
     {
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $name) !== 1) {
             throw new RuntimeException("Invalid identifier: {$name}");
         }
         return '`' . $name . '`';

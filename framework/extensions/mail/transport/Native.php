@@ -21,10 +21,7 @@ final class Native implements MailTransport
 
         try {
             $sent = mail(
-                // mail() writes "To: <this>" verbatim, preserving CRLF+space folding, so the
-                // folded value is what keeps that header inside the 998-octet line limit. It does
-                // NOT reject a bare CRLF here, so nothing but Envelope's per-recipient
-                // FILTER_VALIDATE_EMAIL stands between a recipient and header injection.
+        // mail() preserves this value verbatim; Envelope owns validation and folding.
                 $envelope->recipientsLine(),
                 $envelope->subject,
                 $envelope->body,

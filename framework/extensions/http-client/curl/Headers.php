@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace extensions\http_client\curl;
 
+use core\http\HeaderField;
+
 final class Headers
 {
     /** @return array<string, scalar>|null */
@@ -79,6 +81,11 @@ final class Headers
             $length = strlen($header);
             $header = trim($header);
 
+            if (str_starts_with($header, 'HTTP/')) {
+                $responseHeaders = [];
+                return $length;
+            }
+
             if ($header === '' || !str_contains($header, ':')) {
                 return $length;
             }
@@ -102,11 +109,10 @@ final class Headers
 
     private static function valid(mixed $key, mixed $value): bool
     {
-        if (!is_string($key) || $key === '' || !is_scalar($value)) {
+        if (!is_string($key) || !is_scalar($value)) {
             return false;
         }
 
-        return preg_match('/^[!#$%&\'*+\-.^_`|~0-9A-Za-z]+$/', $key) === 1
-            && preg_match('/[\r\n]/', (string)$value) !== 1;
+        return HeaderField::isName($key) && HeaderField::isValue((string)$value);
     }
 }

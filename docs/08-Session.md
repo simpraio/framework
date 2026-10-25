@@ -24,14 +24,20 @@ $returnUrl = Session::pull('return_url', '/dashboard');
 
 ## Regenerating the session ID
 
-Always regenerate after privilege changes (login, sudo, role escalation):
+Always rotate when the session gains privilege (login, sudo, role escalation):
+
+```php
+Session::rotate();               // new ID, old ID invalidated, CSRF token dropped
+```
+
+`rotate()` also drops the CSRF token stored under `Session::CSRF_KEY`, so a token issued before the change cannot be used after it. The auth and oidc-login extensions call it on every successful sign-in.
+
+To change the ID without touching anything else:
 
 ```php
 Session::regenerate();           // regenerate and invalidate the old session ID
 Session::regenerate(false);      // regenerate but keep the old session ID valid (rare)
 ```
-
-The auth extension calls `regenerate()` automatically on login.
 
 ## Destroying the session
 
@@ -51,6 +57,7 @@ Use on logout after clearing auth state. The auth extension handles this for you
 | `Session::forget($key)` | `void` | Remove `$key` from the session. |
 | `Session::pull($key, $default)` | `mixed` | Return the value for `$key` and remove it. |
 | `Session::regenerate($deleteOld)` | `void` | Issue a new session ID. Invalidates the old session record when `$deleteOld` is `true` (default); current session data survives either setting. |
+| `Session::rotate()` | `void` | Issue a new session ID, invalidate the old one and drop the CSRF token. Call on sign-in or any other gain in privilege. |
 | `Session::destroy()` | `void` | Clear all session data and delete the session. |
 | `Session::isStarted()` | `bool` | Return `true` if the session has been started. |
 | `Session::hasCookie()` | `bool` | Report a non-empty incoming session cookie without starting the session. This does not prove that stored session data exists. |
@@ -80,4 +87,4 @@ session-backed response from being stored by clients or shared caches. An empty 
 automatic headers; use it only when the application sets a safe `Cache-Control` header on every
 session-backed response. `public` is deliberately rejected.
 
-See [Configuration](02-Configuration.md) and [Security](25-Security.md) for deployment guidance.
+See [Configuration](02-Configuration.md) and [Security](26-Security.md) for deployment guidance.

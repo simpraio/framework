@@ -37,7 +37,6 @@ printf("Iterations: %d | OPcache: %s\n\n",
     function_exists('opcache_get_status') && opcache_get_status() !== false ? 'enabled' : 'disabled',
 );
 
-// Isolate each part
 bench('filemtime() × 1 (stat cached)',    $iterations, fn() => filemtime($configFiles[0]));
 bench('filemtime() × 2 (stat cached)',    $iterations, fn() => (int) filemtime($configFiles[0]) . (int) filemtime($localFile));
 bench('hash(xxh3) only',                  $iterations, fn() => hash('xxh3', 'path:/config/app.php:1234567890'));

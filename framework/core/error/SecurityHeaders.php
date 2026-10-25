@@ -5,16 +5,11 @@ declare(strict_types=1);
 namespace core\error;
 
 use core\config\Config;
+use core\http\HeaderField;
 use Throwable;
 
 /**
- * Applies the same security headers the security extension would, for error pages that
- * bypass the normal Response/Extensions pipeline. Reads the security config directly and
- * falls back silently if the extension is disabled, missing, or config isn't initialized
- * yet (very early errors).
- *
- * Error pages are always HTML, so no content-type filtering is needed - every header in
- * the security config applies.
+ * Best-effort headers for HTML errors that bypass the normal extension pipeline.
  */
 final class SecurityHeaders
 {
@@ -50,15 +45,11 @@ final class SecurityHeaders
         if (!is_string($name) || !is_string($value) || $value === '') {
             return;
         }
-        if (preg_match('/[\r\n\0]/', $name . $value) === 1) {
+        if (!HeaderField::isName($name) || !HeaderField::isValue($value)) {
             return;
         }
 
-        // Error pages bypass the Response/Extensions pipeline, so a per-request placeholder an
-        // extension would normally substitute (a CSP nonce) is still unfilled here. Publishing
-        // `'nonce-{...}'` verbatim would advertise a fixed, source-visible nonce, so the whole
-        // source expression is dropped instead - never the directive. What remains is the same
-        // policy without the nonce, which is stricter.
+        // Error rendering cannot populate nonces; drop unresolved nonce source expressions.
         $value = trim((string)preg_replace(
             pattern: '~\s*\'nonce-\{[^}]*\}\'~',
             replacement: '',

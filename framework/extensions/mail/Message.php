@@ -36,8 +36,7 @@ final class Message
 
     public function subject(string $subject): self
     {
-        // Ordinary whitespace only: a plain trim() also strips CR, LF, NUL and VT, which would
-        // quietly remove a control the header rules refuse everywhere else in the same subject.
+        // Do not trim controls that header validation must reject.
         $this->subject = trim($subject, characters: " \t");
 
         return $this;

@@ -9,7 +9,7 @@ use core\http\Request;
 
 final class Guard
 {
-    public const string SESSION_KEY = '_csrf_token';
+    public const string SESSION_KEY = Session::CSRF_KEY;
     public const string FIELD = '_csrf';
     public const string HEADER = 'X-CSRF-Token';
 

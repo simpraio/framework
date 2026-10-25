@@ -14,17 +14,25 @@ final class RequestOptions
     public bool $raw;
     public ?int $timeout;
     public ?int $connectTimeout;
+    public bool $followRedirects;
 
     /** @param array<string, mixed> $options */
     public function __construct(array $options)
     {
         $this->data = $options['data'] ?? null;
-        $this->method = Method::normalize($options['method'] ?? (Body::hasData($this->data) ? 'POST' : 'GET'));
+        $this->method = Method::normalize($options['method'] ?? null, Body::hasData($this->data));
         $this->headers = Headers::normalize($options['headers'] ?? null);
         $this->cookies = self::optionalString($options['cookies'] ?? null);
         $this->raw = ($options['raw'] ?? false) === true;
         $this->timeout = self::optionalInt($options['timeout'] ?? null);
         $this->connectTimeout = self::optionalInt($options['connect_timeout'] ?? null);
+        $this->followRedirects = ($options['follow_redirects'] ?? true) !== false;
+    }
+
+    /** Whether anything goes out as a body, however the verb is spelled. */
+    public function hasBody(): bool
+    {
+        return Body::hasData($this->data) || $this->raw;
     }
 
     public function forRedirect(int $status, bool $sameOrigin = true): self
@@ -39,6 +47,7 @@ final class RequestOptions
             'raw' => $dropBody ? false : $this->raw,
             'timeout' => $this->timeout,
             'connect_timeout' => $this->connectTimeout,
+            'follow_redirects' => $this->followRedirects,
         ]);
     }
 

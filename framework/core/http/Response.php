@@ -32,31 +32,21 @@ final class Response
         return new self($body, $status, 'text/html; charset=UTF-8');
     }
 
+    /** @throws \JsonException for data JSON cannot carry, such as invalid UTF-8 or a non-finite float */
     public static function json(mixed $data, int $status = 200): self
     {
-        $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        return new self($encoded === false ? 'null' : $encoded, $status, 'application/json; charset=UTF-8');
+        $encoded = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        return new self($encoded, $status, 'application/json; charset=UTF-8');
     }
 
     public static function redirect(string $location, int $status = 302): self
     {
-        if (!self::isAllowedRedirect($location)) {
+        if (!Url::isLocal($location)) {
             throw new InvalidArgumentException('Unsafe redirect target: ' . $location);
         }
         $r = new self('', $status);
         $r->headers['Location'] = self::sanitizeHeaderValue($location);
         return $r;
-    }
-
-    private static function isAllowedRedirect(string $location): bool
-    {
-        if ($location === '' || preg_match('/[\x00-\x1F\x7F]/', $location) === 1) {
-            return false;
-        }
-        if (str_starts_with($location, '//') || str_starts_with($location, '/\\')) {
-            return false;
-        }
-        return $location[0] === '/';
     }
 
     public static function noContent(): self
@@ -78,7 +68,7 @@ final class Response
 
     private static function sanitizeHeaderName(string $name): string
     {
-        if ($name === '' || preg_match('/[\r\n\0:]/', $name) === 1) {
+        if (!HeaderField::isName($name)) {
             throw new InvalidArgumentException('Header name is invalid');
         }
 
@@ -87,7 +77,7 @@ final class Response
 
     private static function sanitizeHeaderValue(string $value): string
     {
-        if (preg_match('/[\r\n\0]/', $value) === 1) {
+        if (!HeaderField::isValue($value)) {
             throw new InvalidArgumentException('Header value contains CR, LF, or NUL');
         }
         return $value;

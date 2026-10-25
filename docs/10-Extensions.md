@@ -57,7 +57,7 @@ final class Boot extends \core\extension\Boot
 
 ## Hook
 
-Implementing `Hook` gives the extension two entry points per request. Hooks run in filesystem discovery order.
+Implementing `Hook` gives the extension two entry points per request. Hooks run in [priority order](#order).
 
 ```
 // runs before dispatch - return a Response to short-circuit, null to continue
@@ -92,7 +92,7 @@ public function after(Request $request, Route $route, Response $response): void
 
 ## Contributor
 
-Implementing `Contributor` lets the extension inject tokens and blocks into the layout template after `Layout::compose()` returns. Contributors run in filesystem discovery order.
+Implementing `Contributor` lets the extension inject tokens and blocks into the layout template after `Layout::compose()` returns. Contributors run in [priority order](#order).
 
 ```
 public function contribute(Route $route): array
@@ -133,7 +133,20 @@ The shipped project config decides what loads. Most bundled extensions are disab
 ],
 ```
 
-Discovery order follows the filesystem (`glob()` order, typically alphabetical). Hooks and contributors execute in that same order - the first `before()` hook to return a non-null Response wins.
+### Order
+
+Hooks and contributors run by the `PRIORITY` constant on the extension's `Boot` class: lower runs first, and the default is `0`. Extensions with the same priority run in folder-name order. The first `before()` hook to return a non-null Response wins, so a hook that must see every request runs ahead of hooks that turn requests away:
+
+```php
+final class Boot extends ExtensionBoot implements Hook
+{
+    public const int PRIORITY = -100;
+}
+```
+
+Declare it exactly so - `public const int`: the base class declares a typed constant, and an untyped or non-public one is a fatal error. The order is applied when the hooks are created, so it holds even with an extensions bundle built before a priority changed.
+
+Among the bundled extensions only `ratelimit` sets a priority (`-100`), so it counts requests that `auth` or `csrf` turn away.
 
 ## Bundled Extensions
 
@@ -146,9 +159,10 @@ Discovery order follows the filesystem (`glob()` order, typically alphabetical).
 | `flash` | Contributor | Session flash messages for validation errors and old input. Provides `Flash` static facade and the `{hasErrors}` block. |
 | `http-client` | Bootable | cURL-based HTTP client with retry logic, TLS verification, egress checks, and response size limits. Used mainly as a utility class (`HttpClient::get()`, `HttpClient::post()`); its `Bootable` boot only emits a startup warning when TLS verification is disabled. |
 | `mail` | - | Email sending via SMTP or PHP `mail()`. No hooks - use the `Mail` static facade to compose and send messages from controllers. |
+| `oidc-login` | Contributor | Microsoft and Google sign-in through one explicit API, with optional tenant/group/domain restrictions. No database or dependency on local `auth`; application controllers own the callbacks and any local-account registration. See [OIDC Login](18-Extensions-OIDC-Login.md). |
 | `profiler` | Hook | Appends a request-timing report as an HTML comment to every HTML response. Disabled by default - enable only in development. |
 | `ratelimit` | Hook | IP-based rate limiting. Returns `429 Too Many Requests` when the configured request count per window is exceeded. |
-| `registry` | Contributor | Loads dynamic key-value settings from the `registry` database table per language. Use the `Registry` or `Settings` facade to read values in controllers. Schema: `tools/schema/registry.sql`. |
+| `registry` | Hook | Initializes route language before controllers read dynamic key-value settings. Use the `Registry` or `Settings` facade. Schema: `tools/schema/registry.sql`. |
 | `security` | Hook | Adds HTTP security headers (CSP, X-Frame-Options, Permissions-Policy, etc.) to every response via `after()`. Configurable per header in `config/security.php`. |
 | `seo` | Contributor | Injects per-route title, description, and canonical URL into the layout from the `seo` database table, with config fallbacks. Schema: `tools/schema/seo.sql`. |
 | `translation` | Contributor | Loads translation strings from the `translation` database table and injects them as raw tokens into the layout and page templates. Schema: `tools/schema/translation.sql`. |

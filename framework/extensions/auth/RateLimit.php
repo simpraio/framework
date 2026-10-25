@@ -8,30 +8,13 @@ use core\cache\Cache;
 use core\Instance;
 use core\Request;
 use core\tools\Identifier;
+use core\tools\Silently;
 use RuntimeException;
 
 /**
- * Login throttling. Two axes:
- *   - per-IP+username: tight (rateLimitAttempts) - stops one-host account guessing.
- *   - per-IP:          looser (rateLimitAttempts * 4) - stops one host enumerating users.
- *
- * There is deliberately no blocking per-username counter: it made every account remotely
- * lockable. An unauthenticated attacker who knows a username only has to spread bad passwords
- * across source addresses to keep that account blocked, denying service to the real user while
- * never touching a credential. Both counters here are anchored to the source address, so a
- * failure can only throttle the host that produced it.
- *
- * Fixed-window: each counter's TTL is anchored to its first creation and is
- * not refreshed by subsequent fail() calls. An attacker pacing failures at
- * just under one per window can accumulate hits across boundaries. Acceptable
- * for a small-site framework; replace with a sliding-window limiter if needed.
- *
- * APCu is used when available. Without APCu, auth falls back to small locked
- * files under sys_get_temp_dir(); this is host-local and intended for simple
- * single-server deployments.
- *
- * For general per-IP request throttling unrelated to login, see
- * extensions/ratelimit/Limiter.
+ * Fixed-window limits per IP+username and per IP; never per username alone,
+ * which would let unauthenticated attackers lock out another host's account.
+ * APCu and the locked-file fallback coordinate only on one host.
  */
 final class RateLimit
 {
@@ -79,9 +62,7 @@ final class RateLimit
     }
 
     /**
-     * Clears the successful login's own (username + IP) counter only. The looser per-IP counter is
-     * left standing on purpose: one valid credential must not reset the enumeration budget a host
-     * spent guessing other accounts.
+     * A successful login must not reset the IP's enumeration budget.
      */
     public static function clear(string $username): void
     {
@@ -106,12 +87,8 @@ final class RateLimit
     private static function fileInc(string $key, int $window): void
     {
         $path = self::filePath($key);
-        $dir = dirname($path);
-        if (!is_dir($dir) && !mkdir(directory: $dir, permissions: 0o700, recursive: true) && !is_dir($dir)) {
-            throw new RuntimeException("AUTH_RATE_LIMIT_FILE_FAILED: {$dir}");
-        }
 
-        $fp = self::silent(static fn() => fopen(filename: $path, mode: 'c+'));
+        $fp = Silently::call(static fn() => fopen(filename: $path, mode: 'c+'));
         if ($fp === false) {
             throw new RuntimeException("AUTH_RATE_LIMIT_FILE_FAILED: {$path}");
         }
@@ -132,9 +109,7 @@ final class RateLimit
     }
 
     /**
-     * Increment a fixed window: a live counter keeps its original expiry, only a missing or
-     * expired one starts a new window. This matches the APCu path, where Cache::inc anchors the
-     * TTL to the counter's creation.
+     * Preserve the original expiry, matching APCu's fixed window.
      *
      * @param array{attempts: int, expires: int}|null $counter
      * @return array{attempts: int, expires: int}
@@ -152,20 +127,19 @@ final class RateLimit
     {
         $path = self::filePath($key);
         if (is_file($path)) {
-            self::silent(static fn(): bool => unlink($path));
+            Silently::call(static fn(): bool => unlink($path));
         }
     }
 
     private static function filePath(string $key): string
     {
-        return sys_get_temp_dir() . '/simpra-auth-rl/'
-            . Identifier::fastHash(Instance::prefix() . $key) . '.json';
+        return CounterDirectory::path() . '/' . Identifier::fastHash(Instance::prefix() . $key) . '.json';
     }
 
     /** @return array{attempts: int, expires: int}|null */
     private static function fileRead(string $path): ?array
     {
-        $fp = self::silent(static fn() => fopen(filename: $path, mode: 'r'));
+        $fp = Silently::call(static fn() => fopen(filename: $path, mode: 'r'));
         if ($fp === false) {
             return null;
         }
@@ -222,20 +196,5 @@ final class RateLimit
         ftruncate($fp, size: 0);
         fwrite($fp, $encoded);
         fflush($fp);
-    }
-
-    /**
-     * @template T
-     * @param callable(): T $operation
-     * @return T
-     */
-    private static function silent(callable $operation): mixed
-    {
-        set_error_handler(static fn(): bool => true);
-        try {
-            return $operation();
-        } finally {
-            restore_error_handler();
-        }
     }
 }

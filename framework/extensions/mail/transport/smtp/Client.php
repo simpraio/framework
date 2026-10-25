@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace extensions\mail\transport\smtp;
 
 use extensions\mail\Envelope;
+use extensions\mail\LineEnding;
 use RuntimeException;
+use SensitiveParameter;
 
 final readonly class Client
 {
@@ -67,8 +69,15 @@ final readonly class Client
         }
 
         $this->command('AUTH LOGIN', 334);
-        $this->command(base64_encode($this->config->username), 334);
-        $this->command(base64_encode($this->config->password), 235);
+        $this->credential(base64_encode($this->config->username), 334);
+        $this->credential(base64_encode($this->config->password), 235);
+    }
+
+    /** Kept out of stack traces: a failed AUTH would otherwise log the start of the secret. */
+    private function credential(#[SensitiveParameter] string $line, int $expected): void
+    {
+        $this->connection->write($line . "\r\n");
+        self::expect($this->connection->read(), $expected);
     }
 
     public function send(Envelope $envelope): void
@@ -77,8 +86,7 @@ final readonly class Client
             throw new RuntimeException('SMTP_FROM_MISSING');
         }
 
-        // No SMTPUTF8 parameter: HeaderRules keeps every header ASCII, so there is no raw
-        // UTF-8 field to announce. Unicode travels RFC 2047/2231-encoded.
+        // Headers are ASCII-encoded; SMTPUTF8 is not negotiated.
         $this->command('MAIL FROM:<' . $envelope->fromEmail . '>', 250);
 
         foreach ($envelope->recipients() as $recipient) {
@@ -134,18 +142,7 @@ final readonly class Client
             . 'Subject: ' . $envelope->subject . $eol
             . 'To: ' . $envelope->recipientsLine() . $eol
             . $eol
-            . self::dotStuff(self::normalizeEol($envelope->body));
-    }
-
-    private static function normalizeEol(string $body): string
-    {
-        return str_replace(
-            search: "\n",
-            replace: "\r\n",
-            subject: str_replace(search: ["\r\n", "\r"],
-                replace: "\n",
-                subject: $body)
-        );
+            . self::dotStuff(LineEnding::crlf($envelope->body));
     }
 
     private static function dotStuff(string $body): string

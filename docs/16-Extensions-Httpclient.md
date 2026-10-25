@@ -14,7 +14,7 @@ return [
             'timeout'           => 60,            // total request timeout in seconds
             'connect_timeout'   => 10,            // connection timeout in seconds
             'verify_tls'        => true,          // enforce TLS certificate verification
-            'tls_insecure_acknowledged' => '',     // required only when verify_tls=false
+            'tls_insecure_acknowledged' => '',     // with verify_tls=false, must be Config::TLS_INSECURE_ACK ('I_ACCEPT_INSECURE_TLS')
             'max_response_bytes' => 10_485_760,  // 10 MB response cap
             'cookie_jar_dir'    => null,          // directory for per-session cookie storage
             'allowed_protocols' => ['http', 'https'],
@@ -50,7 +50,20 @@ does have a globally routable address.
 | --- | --- | --- |
 | `HttpClient::get($url, $options)` | `Response` | Sends a GET request. Throws `HttpClientException` on a non-retriable cURL error or after all retries are exhausted. |
 | `HttpClient::post($url, $options)` | `Response` | Sends a POST request. Never retried automatically. |
-| `HttpClient::request($url, $options)` | `Response` | Generic request. Pass `'method'` in `$options` to set the HTTP method. Supported option keys: `method`, `headers`, `data`, `raw`, `cookies`, `timeout`, and `connect_timeout`. |
+| `HttpClient::request($url, $options)` | `Response` | Generic request. Pass `'method'` in `$options` to set the HTTP method. Supported option keys: `method`, `headers`, `data`, `raw`, `cookies`, `timeout`, `connect_timeout`, and `follow_redirects` (default `true`; set `false` to return the original redirect response). |
+
+A URL must be an absolute `http` or `https` URL that `core\http\Url::parse()` accepts, or the
+call throws `HttpClientException('HTTP client URL rejected')` before anything is sent. That
+refuses credentials in the URL - put them in an `Authorization` header instead, as in the
+example below - and any URL containing whitespace, a control byte or a backslash, or with a
+percent-encoded host. The egress guard reads the URL with the same parser, so a URL it
+approves is the URL cURL connects to. A redirect to a refused URL fails the same way, with
+`HTTP client redirect URL rejected`, whether or not the egress guard is on.
+
+`method` is one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD` or `OPTIONS`, in any case -
+the list is `core\http\Request::METHODS`. Leaving it out, or passing `null` or an empty
+string, means `POST` when `data` is set and `GET` when it is not. Any other value throws
+`HttpClientException('HTTP client method rejected')` before anything is sent.
 
 The returned `Response` object exposes:
 

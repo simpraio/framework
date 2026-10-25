@@ -1,5 +1,9 @@
 # Deployment
 
+## One Request per Process
+
+Simpra expects PHP to start each request fresh, as PHP-FPM, Apache's `mod_php` and the built-in server do. The static facades - `Config`, `Db`, `Session`, `Request`, the signed-in `User` and the per-request access rules - keep their state in static properties for the life of the request, and nothing resets them between requests. Do not run it under a worker runtime that serves many requests from one process, such as FrankenPHP worker mode, RoadRunner or Swoole: one visitor's user, session or database connection would carry over to the next.
+
 ## PHP Built-In Server
 
 For local development only - no web server required:

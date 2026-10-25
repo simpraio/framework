@@ -64,6 +64,8 @@ templates/docs/start.html  ->  renders at /docs/start
 
 If a controller exists but returns a `Template` and no matching template file is found, the request returns `404`. Controllers that always return a `Response` (redirects, JSON, file downloads) do not need a template.
 
+Only a concrete class extending `core\Controller` counts as a controller. An abstract base controller or a helper class kept under `modules\` is not one, even when a URL names it, so it is treated like a missing controller: the template is rendered if there is one, and otherwise the request is a `404`.
+
 A route that matches neither a controller nor a template is a `404` raised in `Kernel::run()`, **before** the extension hooks. Whether a page exists is not an access decision, so no extension is asked about it - see [Extensions](10-Extensions.md) for what that means when writing a `before()` hook.
 
 ## Language Prefix

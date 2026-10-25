@@ -22,14 +22,7 @@ final class Flash
     private static array $submitted = [];
 
     /**
-     * Persist field errors and (optionally) selected request input across the
-     * upcoming redirect, so the failed form can be re-rendered with the user's
-     * values pre-filled.
-     *
-     * Input is opt-in via $keep: only listed field names are stored. Default
-     * behavior persists nothing - sensitive fields like `password` cannot
-     * leak to session storage by accident. The caller decides what's safe to
-     * keep (typically: email, name, address - never passwords or tokens).
+     * Only $keep fields enter the session; callers must exclude passwords and tokens.
      *
      * @param array<string, string> $errors field name => error message
      * @param list<string> $keep request fields to persist verbatim
@@ -81,7 +74,7 @@ final class Flash
         }
         self::$loaded = true;
 
-        if (!array_key_exists(session_name(), $_COOKIE)) {
+        if (!Session::hasCookie()) {
             return;
         }
 

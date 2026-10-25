@@ -30,7 +30,7 @@ See [Extension: csrf](12-Extensions-CSRF.md) for configuration, AJAX headers, to
 
 The `security` extension adds HTTP security headers in the response `after()` hook and is **enabled by default**.
 
-See [Extension: security](21-Extensions-Security.md) for exact defaults, config syntax, HSTS behavior, and HTML-only response rules.
+See [Extension: security](22-Extensions-Security.md) for exact defaults, config syntax, HSTS behavior, and HTML-only response rules.
 
 ## Rate Limiting
 
@@ -105,7 +105,7 @@ Set `allowed_hosts` in `config/app.php` to prevent host header injection and cac
 ],
 ```
 
-An empty list (the default) disables the check - acceptable for development, not for production. The comparison is case-insensitive and uses strict equality.
+An empty list (the default) disables the check - acceptable for development, not for production. A value that is not a list - a single host written as a string, or `null` - is a config error rather than an empty list. The comparison is case-insensitive and uses strict equality against the header's host part, without its port. An entry must therefore be a host name or address alone - `example.com`, `127.0.0.1`, `[::1]` - with an internationalised name in its `xn--` form; an entry with a port, path or wildcard is a config error, because it could never match.
 
 ## Outbound Requests (SSRF / Egress)
 
@@ -127,5 +127,5 @@ The client follows up to five HTTP redirects manually instead of using cURL's au
 - Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, auth access, auth group, and error-log purge caches. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.
 - Use `tokens()` for all user-facing values; reserve `rawTokens()` for HTML you produced.
 - Validate and whitelist redirect destinations in your controllers before passing them to `Response::redirect()`.
-- Clear the bundle cache (`rm -f cache/*.php`) on every deploy after a config or framework change - stale bundles silently serve old config and can re-enable disabled extensions (see [Deployment: Updating Code or Configuration](26-Deployment.md#updating-code-or-configuration)).
+- Clear the bundle cache (`rm -f cache/*.php`) on every deploy after a config or framework change - stale bundles silently serve old config and can re-enable disabled extensions (see [Deployment: Updating Code or Configuration](27-Deployment.md#updating-code-or-configuration)).
 - For `http-client` egress, keep the allowlist narrow and include only the external hosts the application actually calls.

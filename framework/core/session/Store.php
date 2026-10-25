@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace core\session;
 
 use core\config\dto\Session as SessionConfig;
+use core\tools\Directory;
 use RuntimeException;
 
 final class Store
@@ -30,9 +31,7 @@ final class Store
 
         if ($this->config->savePath !== '') {
             $path = $this->config->savePath;
-            if (!is_dir($path) && !mkdir(directory: $path, permissions: 0o700, recursive: true) && !is_dir($path)) {
-                throw new RuntimeException("Session: cannot create save path: {$path}");
-            }
+            Directory::ensure($path, 0o700, 'Session: cannot create save path');
             if (!is_writable($path)) {
                 throw new RuntimeException("Session: save path is not writable: {$path}");
             }
@@ -44,10 +43,7 @@ final class Store
             'lifetime' => $this->config->lifetime,
             'path' => $this->config->path,
             'domain' => $this->config->domain,
-            // `secure` is deployment intent, not a per-request inference. The
-            // operator's contract wins. If the site is HTTPS-only, set
-            // session.secure=true and redirect HTTP->HTTPS at the server level.
-            // For HTTP-only dev, set session.secure=false in framework.local.php.
+        // Secure-cookie policy is configured, never inferred from untrusted request headers.
             'secure' => $this->config->secure,
             'httponly' => $this->config->httpOnly,
             'samesite' => $this->config->sameSite,

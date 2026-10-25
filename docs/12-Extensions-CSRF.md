@@ -29,8 +29,10 @@ Three constants expose the key names used by the guard:
 ```
 Guard::FIELD        // '_csrf'         - POST field name
 Guard::HEADER       // 'X-CSRF-Token'  - header name for AJAX requests
-Guard::SESSION_KEY  // '_csrf_token'   - session key
+Guard::SESSION_KEY  // '_csrf_token'   - session key, the same as Session::CSRF_KEY
 ```
+
+`Session::rotate()` drops the token, so every sign-in issues a new one. A form rendered before signing in and submitted after it is refused with 419.
 
 ## Example
 

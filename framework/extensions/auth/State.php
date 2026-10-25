@@ -6,6 +6,7 @@ namespace extensions\auth;
 
 use core\db\Db;
 use core\Session;
+use SensitiveParameter;
 
 final class State
 {
@@ -19,8 +20,7 @@ final class State
             return self::guest();
         }
 
-        // A request with neither a started session nor a session cookie is necessarily a guest;
-        // avoid creating session state merely to confirm that.
+        // Guest checks must not create sessions.
         if (!Session::isStarted() && !Session::hasCookie()) {
             return self::guest();
         }
@@ -69,15 +69,27 @@ final class State
     }
 
     /**
-     * Session-bound fingerprint of the stored password hash. Auth::login() puts it in the
-     * session and revalidation re-derives it from the row, so changing (or resetting) a
-     * password invalidates every session that still carries the old credential. Without it a
-     * stolen session survives the password change that was meant to end it. The bcrypt hash
-     * itself never enters the session; only this digest of it does.
+     * Password changes invalidate the fingerprint; the password hash itself stays out of sessions.
      */
-    public static function credentialFingerprint(string $passwordHash): string
+    public static function credentialFingerprint(#[SensitiveParameter] string $passwordHash): string
     {
         return hash('sha256', $passwordHash);
+    }
+
+    /**
+     * Bind an already-authenticated account to its current stored credential, including any rehash.
+     * External sign-ins use the stored value too; an empty string means the database value is empty.
+     *
+     * @param array<string, mixed> $user the account row; anything in it is carried through
+     * @return array<string, mixed>
+     */
+    public static function sessionPayload(array $user, #[SensitiveParameter] string $passwordHash): array
+    {
+        $user['credential_fingerprint'] = self::credentialFingerprint($passwordHash);
+        unset($user['password']);
+        $user['last_validated_at'] = time();
+
+        return $user;
     }
 
     /**
@@ -100,8 +112,6 @@ final class State
             return null;
         }
 
-        // Adopt a missing fingerprint on first revalidation and refresh group membership at the
-        // same boundary.
         $data['group_id'] = (int)($row['group_id'] ?? Groups::guestId());
         $data['credential_fingerprint'] = $fingerprint;
         $data['last_validated_at'] = $now;

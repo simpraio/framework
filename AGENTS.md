@@ -21,7 +21,10 @@ the point: `CLAUDE.md` is a pointer, never a destination.
 
 Copy this handbook byte-for-byte into every project built on the framework, so framework and
 architecture rules stay aligned across them. Keep product-specific behavior out of it and document
-that in the project's `PRODUCT.md`.
+that in the project's `PRODUCT.md`. `tools/verify-vendored.php` compares both this file and the
+`CLAUDE.md` pointing at it against the framework's own: a project carrying neither is left alone, and
+whichever it carries must match. A copy that has drifted, or a write that landed on the pointer, is
+reported there rather than discovered by an agent reading it.
 
 ## Product-Specific Facts
 
@@ -132,7 +135,9 @@ Do not put application-specific logic in `core/`.
 
 Do not introduce:
 
-- Runtime reflection.
+- Runtime reflection. One exception exists: `Kernel::isController()` calls
+  `ReflectionClass::isAbstract()`, because PHP has no other way to ask whether a class a URL names
+  can be instantiated. It decides only that, never what gets wired or called. Do not add another.
 - Auto-wiring.
 - Service providers.
 - Container bindings.
@@ -201,6 +206,70 @@ Controllers should stay thin:
 Business logic belongs in `app/`.
 
 Templates should render data. Do not hide application logic in templates.
+
+### Tokens carry values, blocks carry decisions
+
+A token is a text channel. `tokens()` HTML-escapes every value and encodes `{` and `}` as
+entities, so a value can never form markup or another marker. Anything that is not text to
+display is in the wrong channel.
+
+A controller passes the value, never the presentation chosen for it: no class name, no
+attribute fragment, no state string a selector reads. The template owns every literal that
+exists for styling, and the controller answers only whether it applies.
+
+```html
+<!-- wrong: the controller picked how a status looks, and named a class to do it -->
+<td><span class="pill {STATUS_CLASS}"><i></i>{STATUS}</span></td>
+
+<!-- right: the controller reports facts, the template holds the classes -->
+<td><span class="pill {IsStatusOk}pill-ok{-IsStatusOk} {IsStatusWarn}pill-warn{-IsStatusWarn}"><i></i>{STATUS}</span></td>
+```
+
+`{STATUS}` is correct in both: it is the value being shown.
+
+Mutually exclusive states take one block each, and the controller answers **every** block in
+the set, the false ones included:
+
+```php
+$template->blocks([
+    'IsStatusOk'   => $status === 'ok',
+    'IsStatusWarn' => $status === 'warn',
+]);
+```
+
+An unanswered block is not read as false - it stays in the output verbatim - so answering
+every block is required, not tidy.
+
+In an attribute, put a space between blocks, **outside** the markers, as the example above
+does. The space is not a precaution against a forgotten block: blocks carry no separator of
+their own, so two adjacent blocks that are both shown run together and neither class applies.
+A space inside the markers fails the opposite way - a forgotten block leaves its class
+standing alone, and it switches on:
+
+```html
+<!-- both true -> "is-selectedis-disabled": neither applies -->
+class="row {IsSelected}is-selected{-IsSelected}{IsDisabled}is-disabled{-IsDisabled}"
+
+<!-- IsDisabled forgotten -> is-disabled applies, though nothing said so -->
+class="row{IsSelected} is-selected {-IsSelected}{IsDisabled} is-disabled {-IsDisabled}"
+
+<!-- right: every combination applies exactly the blocks answered true -->
+class="row {IsSelected}is-selected{-IsSelected} {IsDisabled}is-disabled{-IsDisabled}"
+```
+
+`tests/core/template.php` pins each of these against the engine.
+
+That is more verbose than a single class token, and that is the trade: renaming `pill-ok`
+stays a template change instead of a search through `app/`.
+
+The rule covers any attribute a selector reads, not only `class`. `data-status="{STATUS}"`
+paired with a `[data-status="ok"]` rule puts the same decision back in PHP under another
+name, so it is a block too. `rawTokens()` is no exception either - it exists for HTML the
+application itself rendered, not for smuggling a class name past the escaping.
+
+Name a block for the fact, not the markup, in `PascalCase`: `IsStatusOk`, `HasRows`,
+`CanDelete`. A name like `IsStatusClass` is still "which class?", only with a boolean's
+signature.
 
 ## Extensions
 
@@ -276,6 +345,122 @@ check the path, not just the exit code. And an empty baseline cannot be a zero-b
 that with `missing field`, so the minimum is a `variant` line and an empty `issues` list.
 
 Do not relax thresholds or add unnecessary comments only to silence tooling.
+
+## Testing Contract
+
+When a test must exist, and what a change has to be covered by. Where the file then goes is
+the next section.
+
+```sh
+php tests/run_all.php                 # the generic suite: core/, extensions/, integration/
+php tests/core/router.php             # one suite
+mago lint --minimum-report-level warning
+mago analyze --minimum-report-level warning --reporting-format short
+
+# Outside the default run, each needing something this repo does not control
+php tests/live/http-client.php        # httpbin.org
+php tests/live/mail.php               # a real SMTP relay
+php tests/live/oidc-login.php         # Microsoft and Google endpoints; no credentials needed
+php tests/http_smoke.php              # the bundled demo app
+php tests/security_probe.php --base-url=https://your-app.example --csrf-path=/login --strict
+```
+
+`run_all.php` exits non-zero on any failure and names what it did not run. A suite that
+skipped everything is reported as a skip, never as a pass.
+
+### Risk tiers
+
+Classify before editing, and state the tier in the commit message.
+
+| Tier | Scope |
+|---|---|
+| **L0** | Docs, comments, `CHANGELOG.md`, `UPGRADING.md`. No behaviour change. |
+| **L1** | Implementation under `core/` or an extension, with no change to any public static method's name, signature, return shape or thrown type. |
+| **L2** | Observable behaviour: routing, request parsing, template output, an extension's hook contributions, config keys, enabled/disabled semantics. |
+| **L3** | The public facades in `core/*.php`, session, auth, CSRF, egress, the error handler, config precedence, DB schema or connections, anything in `tools/verify-vendored.php`'s sync map, and any change needing an `UPGRADING.md` entry. |
+
+A change needing a line in `UPGRADING.md` is L3 by definition: each one is manual work for
+every downstream project.
+
+### R1 — Failing test first
+
+Write the test, watch it fail **on its assertion** rather than on a missing `require`, then
+implement. L0 and L1 may skip this if the commit message says why.
+
+Break the code once against a new assertion and confirm the assertion is what fails. Two
+suites in this repository have passed while testing nothing: a stubbed error response with
+an empty body, where a leak through the other field would have gone unseen, and an
+assertion that died as a fatal instead of reporting a `[FAIL]`.
+
+### R2 — Test at the facade, not only the inner class
+
+A suite exercising `core\http\Router` proves the router works. It does not prove
+`core\Request` or `core\Kernel` still reach it.
+
+L2 and L3 need at least one suite going through the public static facade application code
+actually calls: `Bundle`, `Container`, `Controller`, `ErrorHandler`, `Extensions`,
+`Instance`, `Kernel`, `Log`, `Paths`, `Request`, `Result`, `Session`, `Template`, `View`.
+The facades are the contract; everything behind them is free to change, so a test pinned to
+an inner class constrains the wrong thing and misses the only layer a project can observe.
+Inner-class suites stay valuable for branching and edge cases — they just do not satisfy R2
+alone.
+
+### R3 — Test the rejection
+
+Every input with a constrained domain needs a suite supplying an invalid value and asserting
+the refusal. `tests/core/router.php` is the model: `/foo_bar`, `/foo!bad`, `/foo/../etc` and
+`/foo/bar/baz/extra` all map to `NULL` beside the paths that resolve.
+
+On an L3 security surface — CSRF, session, auth, egress, the Host guard — the rejection case
+is mandatory, and it must assert that **nothing was persisted or emitted**, not merely that
+a falsy value came back.
+
+### R4 — Pin the public surface before changing it
+
+Projects vendor this framework flattened and `tools/verify-vendored.php` compares blob
+hashes. That answers "did the copy change?", never "did the contract break?" — a renamed
+method, a reordered parameter, a narrowed return type or a new thrown exception all look
+like ordinary drift, and surface at the next sync as a runtime failure.
+
+So for any L3 change to a `core/*.php` facade: assert the **old** signature before changing
+it, so the break is a failing test rather than a diff; carry the `UPGRADING.md` entry in the
+same commit; and name the old and new call shape there, not just the behaviour. Calling each
+public static method with minimal arguments and asserting the return shape is enough.
+
+### R5 — Every bug fix starts with a reproduction
+
+No fix lands without a suite that fails before it and passes after.
+
+### R6 — Tests never bend the framework
+
+Every line under `framework/` exists for production. A test adapts to the framework; the
+framework never changes shape so a test can reach it. Forbidden, whatever the convenience:
+
+- a parameter only tests pass, such as an injectable clock or a "for testing" flag;
+- `public` visibility on a method, property or constant only tests use from outside its class;
+- an environment variable, config key or file location only a test setup needs;
+- a branch that detects a test, CLI-under-test or fixture environment;
+- an interface, factory or indirection whose only second implementation is a test double.
+
+What tests use instead: reflection for internals (`ReflectionClassConstant`,
+`ReflectionProperty`, `configureFramework()`); a namespace-local function stub for a global
+the framework calls unqualified - `time()` in `tests/extensions/oidc_edges.php`,
+`curl_setopt_array()` in `tests/extensions/http-client-curl-setopt.php`; fixtures and local
+servers from `tests/helpers.php`; and a temporary copy of the framework base where a server
+must find a file the real layout puts elsewhere, as `startFrameworkTestServer()` does. If
+none of these reaches the behaviour, the test is at the wrong layer - go through the facade
+(R2).
+
+A test asserts the expected value literally, not the framework's own constant: comparing a
+URL with the constant that produced it cannot catch the constant being wrong.
+
+To check: a public member that nothing outside `tests/` refers to, and that no document
+describes as API, is a violation until shown otherwise. Fix the test, not the framework.
+
+### R7 — Enforcement
+
+Today every rule above is convention and review: there is no CI in this checkout, so nothing
+machine-checks them. Anything that can be machine-checked should be.
 
 ## Test Layout Contract
 

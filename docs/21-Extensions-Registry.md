@@ -19,6 +19,9 @@ The `registry` database table is required for DB-backed registry values. Schema 
 
 ## Public API
 
+The Registry hook sets the current route language before controller dispatch. Outside that
+request lifecycle, pass a language explicitly or call `Store::setLanguage()` first.
+
 Two facades are available depending on the type of data:
 
 | Call | Returns | Description |

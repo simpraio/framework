@@ -8,6 +8,7 @@ use Closure;
 use core\config\dto\Database;
 use core\Instance;
 use PDO;
+use Pdo\Mysql;
 use PDOStatement;
 use RuntimeException;
 use Throwable;
@@ -15,14 +16,14 @@ use Throwable;
 final class Connection
 {
     private ?PDO $pdo = null;
-    private int $txDepth = 0;
+    private readonly TransactionState $transactions;
 
     public function __construct(
         private readonly Database $config,
     ) {
+        $this->transactions = new TransactionState();
     }
 
-    /** Trigger lazy connection without exposing the underlying PDO. */
     public function ping(): void
     {
         $this->pdo();
@@ -30,6 +31,14 @@ final class Connection
 
     private function pdo(): PDO
     {
+        try {
+            $this->transactions->assertActive($this->pdo);
+        } catch (Throwable $e) {
+            $this->pdo = null;
+            $this->transactions->abort();
+            throw $e;
+        }
+
         return $this->pdo ??= $this->connect();
     }
 
@@ -74,8 +83,7 @@ final class Connection
     }
 
     /**
-     * Acquires a MySQL named lock, runs the callback, releases the lock.
-     * Throws on acquisition failure (timeout or error). MySQL only.
+     * MySQL-only; acquisition errors and timeouts throw.
      *
      * @template T
      * @param Closure(): T $callback
@@ -105,9 +113,7 @@ final class Connection
     }
 
     /**
-     * Wraps the callback in a transaction. Nested calls use SAVEPOINTs so
-     * an inner failure rolls back only the nested work, leaving the outer
-     * transaction intact unless the exception propagates further.
+     * Nested calls use savepoints, not independent transactions.
      *
      * @template T
      * @param Closure(): T $callback
@@ -120,17 +126,14 @@ final class Connection
             $result = $callback();
             $this->txCommit();
         } catch (Throwable $e) {
-            // A failed commit leaves the transaction in an unknown state, so this rollback can
-            // fail too. Its exception must never displace $e, which names what actually broke
-            // the write.
-            // @mago-expect lint:no-empty-catch-clause -- swallowing is the point: $e is rethrown
-            // immediately below, and logging here would pull the log facade into the DB layer to
-            // say nothing $e does not.
+            // @mago-expect lint:no-empty-catch-clause -- preserve the original failure if rollback also fails.
             try {
                 $this->txRollback();
             } catch (Throwable) {
             }
             throw $e;
+        } finally {
+            $this->transactions->leave();
         }
         return $result;
     }
@@ -144,22 +147,16 @@ final class Connection
     private function txBegin(): void
     {
         $pdo = $this->pdo();
-        $this->txDepth === 0
+        $this->transactions->depth === 0
             ? $pdo->beginTransaction()
-            : $pdo->exec("SAVEPOINT level_{$this->txDepth}");
-        $this->txDepth++;
+            : $pdo->exec('SAVEPOINT level_' . $this->transactions->depth);
+        $this->transactions->depth++;
     }
 
-    /**
-     * Both closers drop the depth BEFORE issuing their statement: the level is closed either way,
-     * and a decrement placed after a statement that throws would leave the connection permanently
-     * one level deep, nesting every later SAVEPOINT into a transaction that no longer exists.
-     */
     private function txCommit(): void
     {
         $pdo = $this->pdo();
-        $depth = $this->txDepth;
-        $this->txDepth--;
+        $depth = $this->transactions->depth;
 
         $depth === 1
             ? $pdo->commit()
@@ -168,22 +165,69 @@ final class Connection
 
     private function txRollback(): void
     {
-        // Nothing open - the level was already closed, so there is no savepoint to roll back to
-        // and issuing one would only raise a second, misleading error.
-        if ($this->txDepth === 0) {
-            return;
+        $this->transactions->assertActive(null);
+        $pdo = $this->pdo ?? throw new RuntimeException('Database transaction is aborted');
+        $depth = $this->transactions->depth;
+
+        try {
+            if ($depth > 1) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT level_' . ($depth - 1));
+                return;
+            }
+
+            // Only while one is open: a backend may have closed it already, on a deadlock
+            // or a failed commit, and asking again raises a second error over the first.
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        } catch (Throwable $e) {
+            // Never reconnect while an enclosing transaction callback can still run.
+            $this->pdo = null;
+            $this->transactions->abort();
+
+            throw $e;
+        }
+    }
+
+    /**
+     * TLS attributes use integer keys, which raw database.options does not preserve.
+     *
+     * @return array<int, mixed>
+     */
+    private function tlsOptions(): array
+    {
+        $ssl = $this->config->ssl;
+        if (!$ssl->enabled()) {
+            return [];
         }
 
-        $pdo = $this->pdo();
-        $depth = $this->txDepth;
-        $this->txDepth--;
+        $options = [Mysql::ATTR_SSL_VERIFY_SERVER_CERT => $ssl->verifyServerCert];
 
-        $depth === 1
-            ? $pdo->rollBack()
-            : $pdo->exec('ROLLBACK TO SAVEPOINT level_' . ($depth - 1));
+        if ($ssl->ca !== '') {
+            $options[Mysql::ATTR_SSL_CA] = $ssl->ca;
+        }
+        if ($ssl->cert !== '') {
+            $options[Mysql::ATTR_SSL_CERT] = $ssl->cert;
+            $options[Mysql::ATTR_SSL_KEY] = $ssl->key;
+        }
+
+        return $options;
     }
 
     private function connect(): PDO
+    {
+        return new PDO(
+            dsn: $this->dsn(),
+            username: $this->needsAuth() ? $this->config->username : null,
+            password: $this->needsAuth() ? $this->config->password : null,
+            options: $this->pdoOptions(),
+        );
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    private function pdoOptions(): array
     {
         $defaults = [
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -191,23 +235,17 @@ final class Connection
         $initCommandAttr = null;
 
         if ($this->config->driver === 'mysql') {
-            // Report matched rows (not just changed rows) from UPDATE rowCount(), so
-            // Db::update() can tell "matched but unchanged" (>0) from "no match" (0).
-            $foundRowsAttr = defined('Pdo\\Mysql::ATTR_FOUND_ROWS')
-                ? (int)constant('Pdo\\Mysql::ATTR_FOUND_ROWS')
-                : PDO::MYSQL_ATTR_FOUND_ROWS;
-            $defaults[$foundRowsAttr] = true;
+            // Db::update() returns matched rows, including unchanged values.
+            $defaults[Mysql::ATTR_FOUND_ROWS] = true;
+            $defaults += $this->tlsOptions();
 
-            $initCommandAttr = defined('Pdo\\Mysql::ATTR_INIT_COMMAND')
-                ? (int)constant('Pdo\\Mysql::ATTR_INIT_COMMAND')
-                : PDO::MYSQL_ATTR_INIT_COMMAND;
+            $initCommandAttr = Mysql::ATTR_INIT_COMMAND;
         }
 
         /** @var array<int, mixed> $options */
         $options = $this->config->options + $defaults;
         if ($initCommandAttr !== null) {
-            // UTC storage owns the init command. Reject an application value instead of silently
-            // discarding its session setup; run additional session statements after connecting.
+            // Reserve the init command for the UTC session pin.
             if (array_key_exists($initCommandAttr, $this->config->options)) {
                 throw new RuntimeException(
                     'Config: database.options must not set the MySQL init command; it is reserved for '
@@ -217,15 +255,11 @@ final class Connection
 
             $options[$initCommandAttr] = "SET time_zone = '+00:00'";
         }
+        // Last, so database.options cannot weaken either of them.
         $options[PDO::ATTR_ERRMODE] = PDO::ERRMODE_EXCEPTION;
         $options[PDO::ATTR_EMULATE_PREPARES] = false;
 
-        return new PDO(
-            dsn: $this->dsn(),
-            username: $this->needsAuth() ? $this->config->username : null,
-            password: $this->needsAuth() ? $this->config->password : null,
-            options: $options,
-        );
+        return $options;
     }
 
     private function dsn(): string

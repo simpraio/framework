@@ -17,16 +17,12 @@ final class Header
 
     private const int PARAMETER_SEGMENT_BYTES = 60;
 
-    // Budget reserved for the header name and its ": " delimiter when deciding whether a value
-    // fits unencoded. 'Subject: ' is the longest name encode() is used for; a caller adding a
-    // longer one must keep this in step or an over-long line can slip through unencoded.
+    // Includes 'Subject: '; longer field names require a larger reserved budget.
     private const int NAME_BUDGET_BYTES = 9;
     private const string EOL = "\r\n";
 
     public static function from(string $name, string $email): string
     {
-        // A display name is free text, so a line break in it is flattened to a space rather than
-        // refused; encode() below then sees a value that cannot carry one.
         $name = (string)preg_replace(pattern: '/[\r\n]+/', replacement: ' ', subject: trim($name));
 
         if ($name === '') {
@@ -57,21 +53,21 @@ final class Header
             return $base . ';' . self::EOL . ' ' . $attribute . '="' . $filename . '"';
         }
 
-        $parameters = [];
         $segments = self::parameterSegments($encodedFilename);
 
         if (count($segments) === 1) {
-            $parameters[] = ' ' . $attribute . "*=UTF-8''" . $segments[0];
-        } else {
-            foreach ($segments as $index => $segment) {
-                $parameters[] = sprintf(
-                    ' %s*%d*=%s%s',
-                    $attribute,
-                    $index,
-                    $index === 0 ? "UTF-8''" : '',
-                    $segment,
-                );
-            }
+            return $base . ';' . self::EOL . ' ' . $attribute . "*=UTF-8''" . $segments[0];
+        }
+
+        $parameters = [];
+        foreach ($segments as $index => $segment) {
+            $parameters[] = sprintf(
+                ' %s*%d*=%s%s',
+                $attribute,
+                $index,
+                $index === 0 ? "UTF-8''" : '',
+                $segment,
+            );
         }
 
         return $base . ';' . self::EOL . implode(';' . self::EOL, $parameters);
@@ -79,9 +75,7 @@ final class Header
 
     public static function encode(string $value, bool $force = false): string
     {
-        // CR and LF are refused rather than flattened. A value reaching here is not yet folded -
-        // this method decides the folding - so a line break in it is either a caller mistake or an
-        // injection attempt, and silently rewriting it would hide both.
+        // Folding happens here; input line breaks are not valid continuations.
         $normalized = $value;
 
         if (!function_exists('mb_check_encoding') || !function_exists('mb_strcut')) {
@@ -105,8 +99,7 @@ final class Header
 
         $words = [];
 
-        // Terminates because the value is verified UTF-8 above and no character exceeds four
-        // bytes, so mb_strcut always returns at least one character of the 45-byte window.
+            // Valid UTF-8 guarantees at least one whole character fits the chunk.
         while ($normalized !== '') {
             $chunk = mb_strcut(
                 string: $normalized,

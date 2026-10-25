@@ -10,9 +10,6 @@ return [
         'allowed_hosts' => [],
         'debug' => false,
 
-        // Maximum JSON nesting depth accepted when decoding request bodies.
-        // Bounds CPU/stack cost of decoding a deeply-nested body that is small
-        // enough to slip under the byte limit (a cheap DoS vector). Default 64.
         'max_json_depth' => 64,
     ],
     'route' => [

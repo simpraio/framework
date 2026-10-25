@@ -3,31 +3,13 @@
 declare(strict_types=1);
 
 /**
- * Verify that a project's vendored framework copy still matches this framework checkout.
- *
- *   php tools/verify-vendored.php <path-to-project>
- *
- * A project does not install the framework, it vendors it flattened: framework/core/ becomes core/
- * and framework/extensions/ becomes extensions/ in the application root. That transform is manual, so
- * nothing otherwise reports when it stops holding. This does.
- *
- * It compares **git blob hashes of the working tree**, not raw file bytes. Each repository's own
- * filters (`.gitattributes` eol=lf in a project, `core.autocrlf` in the framework) are applied before
- * hashing, so identical content compares equal even though the bytes on disk differ. Comparing bytes
- * would report every single file as drift. Working tree rather than HEAD is deliberate: uncommitted
- * edits are exactly the drift worth catching early.
- *
+ * Usage: php tools/verify-vendored.php <path-to-project>
+ * Compares working-tree content through each repository's Git filters, not raw disk bytes.
  * Exit codes: 0 in sync, 1 drift found, 2 usage or environment error.
  */
 
 /**
- * framework subtree => project subtree
- *
- * The test tree is vendored too, and at the same path: tests/core/, tests/extensions/, and
- * tests/integration/ hold the generic suites; tests/root.php, tests/helpers.php, and tests/run_all.php
- * are their shared infrastructure.
- * A project's OWN tests live in tests/app/ and tests/wsl/, which are not listed here and so are never
- * compared — that separation is the whole reason the generic suite can be shared at all.
+ * Framework subtree => project subtree. Product-owned test directories are excluded.
  */
 const VENDORED = [
     'framework/core' => 'core',
@@ -38,17 +20,27 @@ const VENDORED = [
 ];
 
 /**
- * Individually vendored files: the shared test infrastructure, which is all the top level holds.
- *
- * Suites are never listed here — they live in the discovered group directories above. A project's own
- * tests/bootstrap.php and tests/run.php are its entry points and are deliberately absent, as are the
- * framework's own tests/http_smoke.php and tests/security_probe.php, which remain explicitly invoked
- * rather than vendored.
+ * Shared infrastructure only; product entry points and deployment probes are not vendored.
  */
 const VENDORED_FILES = [
     'tests/root.php',
     'tests/helpers.php',
     'tests/run_all.php',
+];
+
+/**
+ * The agent handbook and the one-line import that points at it, both copied byte-for-byte
+ * into every project. Kept out of VENDORED_FILES because those double as the marker for
+ * having adopted the generic suite: a checkout with the handbook and no tests would
+ * otherwise be reported as missing every test file.
+ *
+ * Optional in the same sense an extension is - a project without one is not forced to adopt
+ * it - and exact once present, which is the drift this catches. For CLAUDE.md that means a
+ * copy of the handbook, or a write that landed on the pointer, is reported rather than read.
+ */
+const VENDORED_HANDBOOK = [
+    'AGENTS.md',
+    'CLAUDE.md',
 ];
 
 $frameworkRoot = dirname(__DIR__);
@@ -66,34 +58,73 @@ if ($projectRoot === false || !is_dir($projectRoot . '/.git')) {
     exit(2);
 }
 
-/** Run a git command in $repo and return trimmed stdout, or null when git failed. */
-function git(string $repo, string $args): ?string
+/**
+ * Git failures are environment errors, never evidence of an absent vendored file. Stderr is
+ * kept apart from the output: a warning or GIT_TRACE line merged into a path list would turn
+ * the first path into one that matches nothing, and that file would drop out of the check.
+ */
+function git(string $repo, string $args): string
 {
-    $command = 'git -C ' . escapeshellarg($repo) . ' ' . $args . ' 2>&1';
-    $output = [];
-    $status = 0;
-    exec($command, $output, $status);
-
-    return $status === 0 ? trim(implode("\n", $output)) : null;
-}
-
-/** Content hash of a working-tree file, with the owning repository's filters applied. */
-function blobHash(string $repo, string $path): ?string
-{
-    if (!is_file($repo . '/' . $path)) {
-        return null;
+    $errors = tmpfile();
+    $command = 'git -C ' . escapeshellarg($repo) . ' ' . $args;
+    $process = $errors === false ? false : proc_open($command, [1 => ['pipe', 'w'], 2 => $errors], $pipes);
+    if (!is_resource($process)) {
+        fwrite(STDERR, "git failed in {$repo}: could not start {$args}\n");
+        exit(2);
+    }
+    $result = (string)stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    if (proc_close($process) !== 0) {
+        rewind($errors);
+        fwrite(STDERR, "git failed in {$repo}: {$args}\n" . trim((string)stream_get_contents($errors)) . "\n");
+        exit(2);
     }
 
-    return git($repo, 'hash-object -- ' . escapeshellarg($path));
+    return $result;
 }
 
-if (git($frameworkRoot, args: 'rev-parse --git-dir') === null) {
-    fwrite(STDERR, "framework checkout is not a git repository: {$frameworkRoot}\n");
-    exit(2);
+/**
+ * Content hashes of working-tree files, with the owning repository's filters applied; null for
+ * a path that is not a file. Paths go to git a hundred at a time, because starting a process is
+ * expensive on Windows and a project has hundreds of vendored files.
+ *
+ * @param list<string> $paths
+ * @return array<string, ?string>
+ */
+function blobHashes(string $repo, array $paths): array
+{
+    $hashes = array_fill_keys($paths, null);
+    $files = array_values(array_filter($paths, static fn(string $path): bool => is_file($repo . '/' . $path)));
+
+    foreach (array_chunk($files, 100) as $chunk) {
+        // Stderr goes to a file: reading two pipes in turn can deadlock once git fills the second.
+        $errors = tmpfile();
+        $process = $errors === false
+            ? false
+            : proc_open(['git', '-C', $repo, 'hash-object', '--', ...$chunk], [1 => ['pipe', 'w'], 2 => $errors], $pipes);
+        if (!is_resource($process)) {
+            fwrite(STDERR, "git failed in {$repo}: could not start hash-object\n");
+            exit(2);
+        }
+        $output = (string)stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $lines = $output === '' ? [] : explode("\n", trim($output));
+        if (proc_close($process) !== 0 || count($lines) !== count($chunk)) {
+            rewind($errors);
+            fwrite(STDERR, "git failed in {$repo}: hash-object\n" . trim((string)stream_get_contents($errors)) . "\n");
+            exit(2);
+        }
+        foreach ($chunk as $index => $path) {
+            $hashes[$path] = trim($lines[$index]);
+        }
+    }
+
+    return $hashes;
 }
 
-// The generic test suite is adopted as a whole or not at all, so decide once: a project that has not
-// taken it should not be told it is missing every one of them, and one that has taken it must match all.
+git($frameworkRoot, args: 'rev-parse --git-dir');
+
+// Generic tests are optional, but must match in full once adopted.
 $adoptedTests = false;
 foreach (VENDORED_FILES as $marker) {
     if (is_file($projectRoot . '/' . $marker)) {
@@ -107,24 +138,42 @@ $drift = [];
 $missing = [];
 $extra = [];
 $skipped = [];
+/** @var array<string, string> $pairs framework path => project path, compared after hashing */
+$pairs = [];
+
+/**
+ * One ls-files call per repository for every subtree, then each subtree's own entries.
+ *
+ * @param list<string> $subtrees
+ * @return array<string, list<string>>
+ */
+$tracked = static function (string $repo, array $subtrees): array {
+    $listed = git($repo, 'ls-files -z -- ' . implode(' ', array_map('escapeshellarg', $subtrees)));
+    $paths = $listed === '' ? [] : explode("\0", rtrim($listed, "\0"));
+    $bySubtree = [];
+    foreach ($subtrees as $subtree) {
+        $bySubtree[$subtree] = array_values(array_filter($paths, static fn(string $path): bool => str_starts_with($path, $subtree . '/')));
+    }
+    return $bySubtree;
+};
+$frameworkTracked = $tracked($frameworkRoot, array_keys(VENDORED));
+$projectTracked = $tracked($projectRoot, array_values(VENDORED));
 
 foreach (VENDORED as $fromSubtree => $toSubtree) {
     if (!$adoptedTests && str_starts_with($fromSubtree, 'tests/')) {
         continue;
     }
 
-    $listed = git($frameworkRoot, 'ls-files -- ' . escapeshellarg($fromSubtree));
-    if ($listed === null || $listed === '') {
+    if ($frameworkTracked[$fromSubtree] === []) {
         fwrite(STDERR, "nothing tracked under {$fromSubtree} — is this a framework checkout?\n");
         exit(2);
     }
 
-    foreach (explode("\n", $listed) as $frameworkPath) {
+    foreach ($frameworkTracked[$fromSubtree] as $frameworkPath) {
         $relative = substr($frameworkPath, strlen($fromSubtree) + 1);
         $projectPath = $toSubtree . '/' . $relative;
 
-        // A project may vendor a subset of extensions. An extension it does not carry at all is a
-        // deliberate choice, not drift; one it carries partially is drift.
+    // Absent extensions are optional; partially vendored extensions are drift.
         if ($fromSubtree === 'framework/extensions') {
             $extension = explode('/', $relative)[0];
             if (!is_dir($projectRoot . '/extensions/' . $extension)) {
@@ -133,24 +182,10 @@ foreach (VENDORED as $fromSubtree => $toSubtree) {
             }
         }
 
-        $ours = blobHash($frameworkRoot, $frameworkPath);
-        $theirs = blobHash($projectRoot, $projectPath);
-
-        if ($theirs === null) {
-            $missing[] = $projectPath;
-            continue;
-        }
-        if ($ours === $theirs) {
-            $same++;
-            continue;
-        }
-
-        $drift[] = $projectPath;
+        $pairs[$frameworkPath] = $projectPath;
     }
 
-    // Files the project has under a vendored subtree that the framework does not ship.
-    $theirListed = git($projectRoot, 'ls-files -- ' . escapeshellarg($toSubtree));
-    foreach ($theirListed === null || $theirListed === '' ? [] : explode("\n", $theirListed) as $projectPath) {
+    foreach ($projectTracked[$toSubtree] as $projectPath) {
         $relative = substr($projectPath, strlen($toSubtree) + 1);
         if (!is_file($frameworkRoot . '/' . $fromSubtree . '/' . $relative)) {
             $extra[] = $projectPath;
@@ -158,24 +193,42 @@ foreach (VENDORED as $fromSubtree => $toSubtree) {
     }
 }
 
-// Individually vendored files. A partial set is the interesting case, so once the suite is adopted
-// every one of them must be present and identical.
 if ($adoptedTests) {
     foreach (VENDORED_FILES as $path) {
-        $ours = blobHash($frameworkRoot, $path);
-        $theirs = blobHash($projectRoot, $path);
-        if ($theirs === null) {
-            $missing[] = $path;
-            continue;
-        }
-        if ($ours === $theirs) {
-            $same++;
-            continue;
-        }
-        $drift[] = $path;
+        $pairs[$path] = $path;
     }
 } else {
     $skipped['generic test suite (not adopted)'] = true;
+}
+
+$handbook = array_combine(VENDORED_HANDBOOK, VENDORED_HANDBOOK);
+$ours = blobHashes($frameworkRoot, array_keys($pairs + $handbook));
+$theirs = blobHashes($projectRoot, array_values($pairs + $handbook));
+
+foreach ($pairs as $frameworkPath => $projectPath) {
+    if ($theirs[$projectPath] === null) {
+        $missing[] = $projectPath;
+        continue;
+    }
+    if ($ours[$frameworkPath] === $theirs[$projectPath]) {
+        $same++;
+        continue;
+    }
+
+    $drift[] = $projectPath;
+}
+
+foreach (VENDORED_HANDBOOK as $path) {
+    if ($theirs[$path] === null) {
+        $skipped[$path . ' (not adopted)'] = true;
+        continue;
+    }
+    if ($ours[$path] === $theirs[$path]) {
+        $same++;
+        continue;
+    }
+
+    $drift[] = $path;
 }
 
 printf("framework: %s\nproject:   %s\n\n", $frameworkRoot, $projectRoot);
@@ -184,7 +237,7 @@ printf("  drift                %d\n", count($drift));
 printf("  missing in project   %d\n", count($missing));
 printf("  extra in project     %d\n", count($extra));
 if ($skipped !== []) {
-    printf("  extensions not vendored: %s\n", implode(', ', array_keys($skipped)));
+    printf("  not vendored here: %s\n", implode(', ', array_keys($skipped)));
 }
 echo "\n";
 

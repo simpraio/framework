@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace extensions\profiler;
 
+use core\tools\Format;
+
 final class Profiler
 {
     /** @var list<array{0: string, 1: float}> */
@@ -31,7 +33,7 @@ final class Profiler
         foreach (self::$marks as [$label, $t]) {
             $fromStart = ($t - $requestStart) * 1_000;
             $fromPrev  = ($t - $prev) * 1_000;
-            $lines[] = sprintf('  %-42s %8.3f ms  (+%7.3f ms)', $label, $fromStart, $fromPrev);
+            $lines[] = sprintf('  %-42s %8.3f ms  (+%7.3f ms)', Format::escape($label, trim: false), $fromStart, $fromPrev);
             $prev = $t;
         }
 

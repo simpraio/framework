@@ -10,12 +10,7 @@ use core\extension\Boot as ExtensionBoot;
 use core\http\Route;
 
 /**
- * SECURITY: translations are emitted as `rawTokens` (no HTML escaping) so
- * editors can include markup. The `translation.text` column is therefore
- * trusted content - it MUST only be writable by administrators. Never
- * expose translation editing to untrusted users (e.g. external translators)
- * without first sanitising input or splitting plain vs. HTML translations
- * into separate token bags.
+ * Translations render as unescaped HTML. Only trusted administrators may edit them.
  */
 final class Boot extends ExtensionBoot implements Contributor
 {

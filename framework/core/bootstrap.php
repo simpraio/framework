@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 $core = __DIR__;
 
+require_once $core . '/tools/IntegerRange.php';
+require_once $core . '/tools/Silently.php';
+require_once $core . '/tools/Directory.php';
 require_once $core . '/config/Cast.php';
 require_once $core . '/config/Map.php';
 require_once $core . '/config/IpRange.php';
@@ -38,6 +41,7 @@ require_once $core . '/http/Router.php';
 require_once $core . '/cache/Memory.php';
 require_once $core . '/cache/Apcu.php';
 require_once $core . '/cache/Cache.php';
+require_once $core . '/cache/Optional.php';
 
 require_once $core . '/log/Writer.php';
 require_once $core . '/session/Store.php';
@@ -52,6 +56,7 @@ require_once $core . '/Result.php';
 require_once $core . '/Paths.php';
 require_once $core . '/Instance.php';
 require_once $core . '/Container.php';
+require_once $core . '/template/Block.php';
 require_once $core . '/Template.php';
 require_once $core . '/View.php';
 require_once $core . '/Controller.php';

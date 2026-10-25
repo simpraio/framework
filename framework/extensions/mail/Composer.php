@@ -28,9 +28,7 @@ final class Composer
             throw new InvalidArgumentException('NO_RECIPIENT');
         }
 
-        // Resolve and validate the From address once here, so the From header and the Message-ID
-        // derive from the same FILTER_VALIDATE_EMAIL-checked value. messageId() must never see a
-        // raw caller-supplied address: a CRLF after its last '@' would inject further headers.
+        // Message-ID must derive from the validated sender to prevent header injection.
         $fromEmail = self::resolveFromEmail($message->fromEmail, $config->fromEmail);
 
         [$body, $contentType] = $message->attachments === []
@@ -139,14 +137,10 @@ final class Composer
     }
 
     /**
-     * @param string $fromEmail a FILTER_VALIDATE_EMAIL-checked address, resolved once in build().
-     *                          That validation is what guarantees the derived domain carries no
-     *                          CRLF and so cannot inject additional headers into the message.
+     * @param string $fromEmail a validated address; its domain is inserted into a header.
      */
     private static function messageId(string $fromEmail): string
     {
-        // A validated address always contains '@', so strrpos never returns false; the cast
-        // states that invariant for the type checker.
         $domain = substr(string: $fromEmail, offset: (int)strrpos(haystack: $fromEmail, needle: '@') + 1);
 
         return sprintf('<%s@%s>', bin2hex(random_bytes(16)), $domain);
@@ -161,16 +155,13 @@ final class Composer
         $normalized = [];
 
         foreach ($headers as $name => $value) {
-            // Only ordinary whitespace is trimmed, and the value is judged before it is: a plain
-            // trim() also strips CR, LF, NUL and VT, so an edge-positioned control would be gone
-            // before any check saw it and the header kept as though it had been clean.
+            // Validate before trimming so edge-positioned controls cannot disappear.
             $name = trim($name, characters: " \t");
 
             if (
                 $name === ''
                 || $value === ''
-                // A caller's value is not folded, so any CRLF in it is malformed rather than
-                // a continuation - stricter here than the shared rule needs to be.
+            // Caller-supplied headers cannot contain folding or injected line breaks.
                 || preg_match('/[\r\n]/', $name . $value) === 1
                 || !HeaderRules::nameIsValid($name)
                 || !HeaderRules::isRenderable($name, $value)
@@ -193,14 +184,6 @@ final class Composer
 
     private static function encodeBody(string $body): string
     {
-        $body = str_replace(
-            search: "\n",
-            replace: self::EOL,
-            subject: str_replace(search: ["\r\n", "\r"],
-            replace: "\n",
-            subject: $body)
-        );
-
-        return chunk_split(base64_encode($body), length: 76, separator: self::EOL);
+        return chunk_split(base64_encode(LineEnding::crlf($body)), length: 76, separator: self::EOL);
     }
 }

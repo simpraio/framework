@@ -4,15 +4,27 @@ declare(strict_types=1);
 
 namespace extensions\http_client\curl;
 
+use core\http\Request;
+use InvalidArgumentException;
+
 final class Method
 {
-    private const array METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
-
-    public static function normalize(mixed $method): string
+    /**
+     * A missing or empty method means POST when there is data and GET when there is not;
+     * one the client does not send is refused rather than sent as something else.
+     */
+    public static function normalize(mixed $method, bool $hasData = false): string
     {
-        $method = strtoupper((string)$method);
+        if ($method === null || $method === '') {
+            return $hasData ? 'POST' : 'GET';
+        }
 
-        return in_array($method, self::METHODS, strict: true) ? $method : 'GET';
+        $name = is_string($method) ? strtoupper($method) : '';
+        if (!in_array($name, Request::METHODS, strict: true)) {
+            throw new InvalidArgumentException('HTTP client method rejected');
+        }
+
+        return $name;
     }
 
     /** @return array<int, mixed> */

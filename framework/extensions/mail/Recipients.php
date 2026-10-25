@@ -7,12 +7,7 @@ namespace extensions\mail;
 use InvalidArgumentException;
 
 /**
- * The envelope's recipient list: validated, and rendered as a `To:` value.
- *
- * Separate from {@see Envelope} because it answers a question about the addresses themselves rather
- * than about the message. Both transports depend on this validation - the SMTP client puts each
- * address in a RCPT TO command, and `mail()` writes the rendered value into a To header without
- * checking it - so an address that got here unvalidated would reach the wire either way.
+ * Both transports write these addresses directly; validation prevents command/header injection.
  */
 final class Recipients
 {
@@ -42,9 +37,6 @@ final class Recipients
     }
 
     /**
-     * The addresses as a `To:` header value, folded between addresses so no line passes
-     * Header::MAX_LINE_BYTES.
-     *
      * @param non-empty-list<string> $recipients
      */
     public static function fold(array $recipients): string

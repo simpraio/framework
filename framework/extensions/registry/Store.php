@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace extensions\registry;
 
 use core\cache\Cache;
+use core\cache\Optional;
 use core\db\Db;
 use RuntimeException;
-use Throwable;
 
 final class Store
 {
@@ -44,15 +44,13 @@ final class Store
     {
         $config = Config::enabled();
 
-        try {
-            return Cache::remember(
-                self::cacheKey($group, $language),
-                static fn(): array => self::fetch($group, $language),
-                $config->cacheTtl,
-            );
-        } catch (Throwable) {
-            return [];
-        }
+        return Optional::remember(
+            self::cacheKey($group, $language),
+            static fn(): array => self::fetch($group, $language),
+            $config->cacheTtl,
+            [],
+            'Registry group unavailable; rendering without it',
+        );
     }
 
     public static function clear(string $group, string $language): void

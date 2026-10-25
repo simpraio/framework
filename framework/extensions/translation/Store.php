@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace extensions\translation;
 
 use core\cache\Cache;
+use core\cache\Optional;
 use core\db\Db;
-use Throwable;
 
 final class Store
 {
@@ -17,15 +17,13 @@ final class Store
     {
         $config = Config::enabled();
 
-        try {
-            return Cache::remember(
-                self::cacheKey($pathId, $language),
-                static fn(): array => self::fetch($pathId, $language),
-                $config->cacheTtl,
-            );
-        } catch (Throwable) {
-            return [];
-        }
+        return Optional::remember(
+            self::cacheKey($pathId, $language),
+            static fn(): array => self::fetch($pathId, $language),
+            $config->cacheTtl,
+            [],
+            'Translations unavailable; rendering message IDs',
+        );
     }
 
     public static function clear(string $pathId, string $language): void

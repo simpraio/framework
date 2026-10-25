@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace core;
 
+use core\template\Block;
 use core\tools\Format;
 
 final class Template
@@ -22,11 +23,7 @@ final class Template
         $replace = [];
         foreach ($tokens as $key => $value) {
             $search[] = '{' . $key . '}';
-            // Escape both HTML grammar (<, >, &, ", ') and template grammar
-            // ({, }) so a user value can never form a token or block marker
-            // in the rendered output. Browsers decode &#123;/&#125; back to
-            // { and } visually - end users see the original characters.
-            // Use rawTokens() for content that legitimately contains braces.
+        // Escape template markers as well as HTML so user values cannot inject blocks or tokens.
             $replace[] = str_replace(
                 search: ['{', '}'],
                 replace: ['&#123;', '&#125;'],
@@ -58,23 +55,13 @@ final class Template
     {
         foreach ($blocks as $name => $visible) {
             $show = $visible === true || $visible === 'show' || $visible === 'true';
-            $pattern = '/\{' . preg_quote($name, delimiter: '/') . '\}(.*?)\{-' . preg_quote(
-                    $name,
-                    delimiter: '/'
-                ) . '\}/s';
-            $this->content = preg_replace_callback(
-                $pattern,
-                static fn(array $m): string => $show ? $m[1] : '',
-                $this->content
-            ) ?? $this->content;
+            $this->content = Block::apply($this->content, strval($name), $show);
         }
         return $this;
     }
 
     /**
-     * Renders the template repeatedly for each row and returns the concatenated result.
-     * Each entry in $rows is a flat token array (escaped). Optional parallel arrays
-     * $rawRows and $blockRows are keyed by the same index for raw tokens and block flags.
+     * Parallel token and block arrays use the same row index.
      *
      * @param list<array<string, string>> $rows
      * @param list<array<string, string>> $rawRows

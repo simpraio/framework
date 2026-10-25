@@ -4,12 +4,9 @@ declare(strict_types=1);
 
 namespace core\config;
 
+use core\tools\IntegerRange;
 use RuntimeException;
 
-/**
- * Strict casts for config values. Fails loudly on invalid input
- * instead of silently coercing (e.g. "abc" -> 0).
- */
 final class Cast
 {
     public static function int(mixed $value, string $field, int $default = 0): int
@@ -20,28 +17,13 @@ final class Cast
         if (is_int($value)) {
             return $value;
         }
-        if (is_string($value) && preg_match('/^-?\d+$/', $value) === 1) {
-            // Guard against silent overflow: (int) saturates a too-large numeric string.
-            if (!self::integerStringInRange($value)) {
+        if (is_string($value) && preg_match('/^-?\d+$/D', $value) === 1) {
+            if (!IntegerRange::fits($value)) {
                 throw new RuntimeException("Config: '{$field}' must fit in a PHP integer, got " . $value);
             }
             return (int)$value;
         }
         throw new RuntimeException("Config: '{$field}' must be an integer, got " . get_debug_type($value));
-    }
-
-    /** Whether a `^-?\d+$` string fits within PHP_INT_MIN..PHP_INT_MAX. */
-    private static function integerStringInRange(string $value): bool
-    {
-        $negative = str_starts_with($value, '-');
-        $digits = ltrim($negative ? substr(string: $value, offset: 1) : $value, characters: '0');
-        if ($digits === '') {
-            return true;
-        }
-
-        $limit = $negative ? substr(string: (string)PHP_INT_MIN, offset: 1) : (string)PHP_INT_MAX;
-        return strlen($digits) < strlen($limit)
-            || (strlen($digits) === strlen($limit) && strcmp($digits, $limit) <= 0);
     }
 
     public static function bool(mixed $value, string $field, bool $default = false): bool
@@ -52,9 +34,7 @@ final class Cast
         if (is_bool($value)) {
             return $value;
         }
-        // filter_var() reads a blank string as FALSE rather than as a failure, which would let a
-        // whitespace-only value silently disable whatever the key controls while int() and
-        // string() reject the same input. Rejected explicitly instead.
+        // FILTER_VALIDATE_BOOLEAN accepts blank strings as false, not invalid input.
         if (is_string($value) && trim($value) === '') {
             throw new RuntimeException("Config: '{$field}' must be a boolean, got a blank string.");
         }
@@ -66,10 +46,7 @@ final class Cast
     }
 
     /**
-     * A string restricted to a fixed set of accepted values, matched case-insensitively and
-     * returned in the canonical spelling from $allowed. For config keys that are effectively
-     * enums (log level, cookie SameSite), where an unvalidated typo is accepted and surfaces later
-     * as wrong behaviour instead of a boot error.
+     * Match case-insensitively and return the configured canonical spelling.
      *
      * @param non-empty-list<string> $allowed canonical spellings
      */
@@ -102,7 +79,6 @@ final class Cast
         throw new RuntimeException("Config: '{$field}' must be a string, got " . get_debug_type($value));
     }
 
-    /** Cast::string(), trimmed of surrounding whitespace. */
     public static function trimmedString(mixed $value, string $field, string $default = ''): string
     {
         return trim(self::string($value, $field, $default));

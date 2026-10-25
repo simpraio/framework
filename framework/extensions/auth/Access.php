@@ -4,93 +4,55 @@ declare(strict_types=1);
 
 namespace extensions\auth;
 
-use core\cache\Cache;
 use core\db\Db;
 
+/** The current user's access, from `auth_access`. A path's rules are read once per request. */
 final class Access
 {
+    /** @var array<string, Rules> path id => its rules */
+    private static array $rules = [];
+
     public static function isControlled(string $pathId): bool
     {
         Config::enabled();
-
-        return Cache::remember(
-            'access.ctrl.' . $pathId,
-            static fn(): bool => Db::row(
-                    "SELECT 1 FROM `auth_access` WHERE `path_id` = :path_id AND `block` = '' LIMIT 1",
-                    ['path_id' => $pathId]
-                ) !== null,
-            3600
-        );
+        return self::rules($pathId)->controlled();
     }
 
     public static function allowedPath(string $pathId): bool
     {
         Config::enabled();
-
-        foreach (self::rows($pathId) as $row) {
-            if (($row['block'] ?? '') === '') {
-                return ($row['policy'] ?? '') === 'allow';
-            }
-        }
-        return false;
+        [$userId, $groupId] = self::user();
+        return self::rules($pathId)->allowed($userId, $groupId);
     }
 
-    /**
-     * Resolve per-block visibility for the current user.
-     *
-     * Precedence (most specific wins): user-specific row > group-specific row > global row.
-     * Implemented via SQL ORDER BY `block`, `user_id` DESC, `group_id` DESC plus `??=`,
-     * which keeps the first row seen per block and ignores later, less-specific rows.
-     * As a result, a user-level `allow` overrides a group-level `deny` for the same block.
-     *
-     * @return array<string, bool> block name => visible
-     */
+    /** @return array<string, bool> block name => visible, for every block configured for the path */
     public static function pathBlocks(string $pathId): array
     {
         Config::enabled();
-
-        $blocks = [];
-        foreach (self::rows($pathId) as $row) {
-            $name = (string)($row['block'] ?? '');
-            if ($name !== '') {
-                $blocks[$name] ??= ($row['policy'] ?? '') === 'allow';
-            }
-        }
-        return $blocks;
+        [$userId, $groupId] = self::user();
+        return self::rules($pathId)->blocks($userId, $groupId);
     }
 
-    /** @var array<string, list<array<string, mixed>>> */
-    private static array $cache = [];
-
-    /** @return list<array<string, mixed>> */
-    private static function rows(string $pathId): array
+    private static function rules(string $pathId): Rules
     {
-        $params = self::userParams();
-        $key = $pathId . '.' . $params['user_id'] . '.' . $params['group_id'];
-
-        return self::$cache[$key] ??= Db::select(
+        return self::$rules[$pathId] ??= Rules::fromRows(Db::select(
             "
             SELECT
-                `block`, `policy`
+                `auth_access`.`block`, `auth_access`.`user_id`, `auth_access`.`group_id`,
+                `auth_access`.`policy`, `auth_group`.`status`
             FROM
                 `auth_access`
+                LEFT JOIN `auth_group` ON `auth_group`.`group_id` = `auth_access`.`group_id`
             WHERE
-                `path_id` = :path_id AND
-                (`user_id` = 0 OR `user_id` = :user_id) AND
-                (`group_id` = 0 OR `group_id` = :group_id)
-            ORDER BY
-                `block`, `user_id` DESC, `group_id` DESC",
-            ['path_id' => $pathId, ...$params]
-        );
+                `auth_access`.`path_id` = :path_id",
+            ['path_id' => $pathId]
+        ));
     }
 
-    /** @return array<string, int> */
-    private static function userParams(): array
+    /** @return array{int, int} user id, group id */
+    private static function user(): array
     {
         $user = User::current();
-        return [
-            'user_id'  => (int)($user->user_id ?? 0),
-            'group_id' => (int)($user->group_id ?? 0),
-        ];
+        return [(int)($user->user_id ?? 0), (int)($user->group_id ?? 0)];
     }
 }
