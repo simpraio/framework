@@ -12,9 +12,13 @@ final class RequestPayload
 {
     private const int DEFAULT_MAX_DEPTH = 64;
 
+    /** application/json or a +json type, by the media type alone: parameters are not part of it. */
     public static function isJson(?string $contentType): bool
     {
-        return stripos(haystack: $contentType ?? '', needle: 'application/json') !== false;
+        $mediaType = strtolower(trim(explode(';', $contentType ?? '', limit: 2)[0]));
+
+        return $mediaType === 'application/json'
+            || (str_starts_with($mediaType, 'application/') && str_ends_with($mediaType, '+json'));
     }
 
     /** @return array<string, mixed> */

@@ -22,7 +22,7 @@ The default module and controller are set in `config/app.php` under `route.defau
 
 ## Segment Rules
 
-Every URL segment is validated before dispatch. Allowed characters are lowercase letters, digits, and hyphens - nothing else. Uppercase is lowercased automatically. Any other character (dot, underscore, slash, space, `%`, `..`) causes an immediate `404` before any file is touched.
+Every URL segment is validated before dispatch. Allowed characters are lowercase letters, digits, and hyphens - nothing else - and a hyphen only between two letters or digits: never first, last or doubled. Uppercase is lowercased automatically. Any other segment (a dot, underscore, slash, space, `%`, `..`, or a misplaced hyphen) causes an immediate `404` before any file is touched.
 
 ```
 /blog/my-post         [ok]  valid
@@ -30,7 +30,11 @@ Every URL segment is validated before dispatch. Allowed characters are lowercase
 /blog/my_post         [x]  underscore not allowed -> 404
 /blog/../config       [x]  dot not allowed -> 404
 /blog/post%20name     [x]  percent-encoded characters -> 404
+/blog/my-post-        [x]  trailing hyphen -> 404
+/blog/my--post        [x]  doubled hyphen -> 404
 ```
+
+The hyphen rule keeps one spelling per controller. Its class name drops the hyphens, so `my-post-` would otherwise reach `MyPost` under a path that no rule keyed on `blog/my-post` covers. For the same reason a controller answers only on the spelling its class declares: `/blog/mypost` does not reach `MyPost`, even where a case-insensitive filesystem would load the file.
 
 This whitelist is the primary path-traversal guard. Paths reaching the filesystem (controller class loader, template loader) are constructed from pre-validated segments only.
 
@@ -46,7 +50,9 @@ my-post          MyPost
 about-us         AboutUs
 ```
 
-The template path uses the original hyphenated segment name: `templates/{module}/{controller}.html`. No mapping is applied to the template path.
+The module segment names the namespace with its hyphens turned into underscores, as an extension's folder does: `/my-blog/post` runs `modules\my_blog\Post` from `modules/my-blog/Post.php`.
+
+The template path uses the original hyphenated segment names: `templates/{module}/{controller}.html`. No mapping is applied to the template path.
 
 ```
 /blog/my-post  ->  modules\blog\MyPost::compose()

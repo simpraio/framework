@@ -23,8 +23,8 @@ Use these methods when you need translations in PHP code (controllers, services)
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Translation::text($pathId, $id, $language, $values)` | `string` | Returns the translation string HTML-escaped. Use for plain-text output in PHP code. `$values` is an optional substitution map applied before escaping. |
-| `Translation::html($pathId, $id, $language, $values)` | `string` | Returns the translation string with `$values` HTML-escaped but the surrounding text unescaped - for translations that contain HTML markup. |
+| `Translation::text($pathId, $id, $language, $values)` | `string` | Returns the translation string HTML-escaped, braces included, so it can be put into a page with `rawTokens()` and form no marker there. Use for plain-text output in PHP code. `$values` is an optional substitution map applied before escaping. |
+| `Translation::html($pathId, $id, $language, $values)` | `string` | Returns the translation string with `$values` HTML-escaped, braces included, but the surrounding text unescaped - for translations that contain HTML markup. |
 | `Translation::clear($pathId, $language)` | `void` | Clears the APCu cache for a given path and language. Omit `$language` to clear all languages for that path. |
 
 In templates, tokens are referenced directly without calling PHP - the contributor injects them automatically:

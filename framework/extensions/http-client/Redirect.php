@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace extensions\http_client;
 
+use core\http\Url;
+
 final class Redirect
 {
     public const int MAX = 5;
@@ -28,5 +30,19 @@ final class Redirect
         }
 
         return Reference::resolve($base, trim($location));
+    }
+
+    /** Unparseable on either side counts as a different origin, so headers stay behind. */
+    public static function sameOrigin(string $from, string $to): bool
+    {
+        $a = Url::parse($from);
+        $b = Url::parse($to);
+
+        return $a !== null && $b !== null && $a->origin() === $b->origin();
+    }
+
+    public static function isDowngrade(string $from, string $to): bool
+    {
+        return Url::parse($from)?->scheme === 'https' && Url::parse($to)?->scheme !== 'https';
     }
 }

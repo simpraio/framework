@@ -26,7 +26,9 @@ final class Login
         $config = Config::enabled($provider);
         $target = $returnTo !== null && Url::isLocal($returnTo) ? $returnTo : '';
 
-        return (new Response('', 302))->header('Location', Flow::authorizeUrl($config, Flow::begin($config, $target)));
+        // Every redirect here belongs to one visitor's sign-in, so no shared cache may keep it.
+        return (new Response('', 302))->header('Location', Flow::authorizeUrl($config, Flow::begin($config, $target)))
+            ->header('Cache-Control', 'no-store');
     }
 
     /** @param (callable(Throwable): void)|null $onFailure */
@@ -34,7 +36,7 @@ final class Login
     {
         $config = Config::enabled($provider);
         try {
-            return Response::redirect(self::complete($config, $request));
+            return Response::redirect(self::complete($config, $request))->header('Cache-Control', 'no-store');
         } catch (Exception $e) {
             try {
                 if ($onFailure !== null) {
@@ -44,7 +46,7 @@ final class Login
                 // Failure reporting must not replace the redirect.
                 unset($ignored);
             }
-            return Response::redirect($config->failureRedirect);
+            return Response::redirect($config->failureRedirect)->header('Cache-Control', 'no-store');
         }
     }
 
@@ -57,7 +59,7 @@ final class Login
         User::clear($provider);
         self::endSession($config, $destroySession);
 
-        return Response::redirect($path);
+        return Response::redirect($path)->header('Cache-Control', 'no-store');
     }
 
     private static function endSession(Provider $config, bool $destroySession): void

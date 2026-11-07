@@ -20,7 +20,7 @@ This is not missing architecture. It is smaller architecture on purpose. See [do
 
 The same choices that keep Simpra readable for people make it easy to hand to an AI coding assistant such as Claude, Copilot or Codex.
 
-**It fits in the context.** `core/` is 65 files and about 5,400 lines; with every bundled extension it is 169 files and about 12,400 lines. At the common estimate of four bytes per token, that is roughly 40,000 tokens for the core and 90,000 with all extensions. Either fits in a 200,000-token context window, the size current Claude models offer, with room left for your application. There is no `vendor/` directory behind it: the framework has no dependencies, so nothing it relies on is out of the assistant's sight.
+**It fits in the context.** `core/` is 65 files and about 5,600 lines; with every bundled extension it is 172 files and about 13,000 lines. At the common estimate of four bytes per token, that is roughly 42,000 tokens for the core and 100,000 with all extensions. Either fits in a 200,000-token context window, the size current Claude models offer, with room left for your application. There is no `vendor/` directory behind it: the framework has no dependencies, so nothing it relies on is out of the assistant's sight.
 
 **Nothing is wired in secret.** The kernel wires its internal container explicitly; there is no autowiring, application container configuration, service provider or attribute routing to trace. A URL `/{module}/{controller}/{id?}` is served by `modules/{module}/{Controller}.php` and `templates/{module}/{controller}.html`. Templates are plain HTML with `{TOKEN}` placeholders and `{Block}...{-Block}` sections, not a template language. An assistant can find what runs by opening the files the URL names.
 

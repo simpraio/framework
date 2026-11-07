@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace extensions\validation;
 
+use core\tools\Silently;
 use DateTimeImmutable;
 
 final class Validator
@@ -52,7 +53,7 @@ final class Validator
         bool $trim = false,
         bool $optional = false,
     ): ?string {
-        if (!$this->state->isScalarOrNull($name)) {
+        if (!$this->state->isTextOrNull($name)) {
             return $this->state->fail($name, 'string');
         }
 
@@ -60,6 +61,10 @@ final class Validator
         $value = $trim ? trim($value) : $value;
         if ($value === '') {
             return $this->state->blank($name, $optional);
+        }
+
+        if (!mb_check_encoding($value, encoding: 'UTF-8')) {
+            return $this->state->fail($name, 'string');
         }
 
         if (!$this->state->withinBounds($name, mb_strlen($value), $min, $max)) {
@@ -73,7 +78,8 @@ final class Validator
     {
         /** @var mixed $raw */
         $raw = $this->state->raw($name);
-        if ($this->state->isBlank($raw)) {
+        // FILTER_VALIDATE_BOOL trims and reads what remains of whitespace alone as false, which would pass a required field.
+        if ($this->state->isBlank($raw) || (is_string($raw) && trim($raw) === '')) {
             return $this->state->blank($name, $optional);
         }
 
@@ -92,36 +98,61 @@ final class Validator
             return null;
         }
 
-        $result = preg_match($pattern, $value);
-        if ($result === false) {
+        // A malformed pattern also raises a compile warning, which the framework's error handler
+        // would turn into an ErrorException ahead of the InvalidArgumentException below.
+        $result = Silently::call(static fn(): int|false => preg_match($pattern, $value));
+        if ($result === false && !$this->exhaustedPcreLimit()) {
             throw new \InvalidArgumentException("Invalid regex pattern: {$pattern}");
         }
 
         if ($result !== 1) {
-            $this->state->unsetValue($name);
             return $this->state->fail($name, 'pattern');
         }
 
         return $value;
     }
 
+    /**
+     * A malformed pattern is the developer's error; a limit is reached by what the user sent,
+     * so it fails the value instead of turning hostile input into a 500.
+     */
+    private function exhaustedPcreLimit(): bool
+    {
+        return in_array(
+            preg_last_error(),
+            [PREG_BACKTRACK_LIMIT_ERROR, PREG_RECURSION_LIMIT_ERROR, PREG_JIT_STACKLIMIT_ERROR],
+            strict: true,
+        );
+    }
+
     public function email(string $name, bool $optional = false): ?string
     {
         /** @var mixed $raw */
         $raw = $this->state->raw($name);
-        if (!is_string($raw) || trim($raw) === '') {
+        if ($this->state->isBlank($raw) || (is_string($raw) && trim($raw) === '')) {
             return $this->state->blank($name, $optional);
         }
 
+        if (!is_string($raw)) {
+            return $this->state->fail($name, 'email');
+        }
+
         $value = trim($raw);
-        if (filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
+        // FILTER_VALIDATE_EMAIL accepts a quoted local part, whose quoted-pairs can carry CR, LF or NUL and
+        // end an SMTP command or a header line; no control byte, space, quote, backslash or angle bracket passes.
+        if (preg_match('/^[^\x00-\x20\x7f<>"\\\\]+$/D', $value) !== 1 || filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
             return $this->state->fail($name, 'email');
         }
 
         return $this->state->pass($name, $value);
     }
 
-    /** @param array<int, mixed> $choices */
+    /**
+     * Input and choices are compared as strings; the matched choice is returned, so the
+     * result has the choice's type rather than the input's.
+     *
+     * @param array<int, mixed> $choices
+     */
     public function in(string $name, array $choices, bool $optional = false): mixed
     {
         /** @var mixed $raw */
@@ -132,11 +163,12 @@ final class Validator
 
         $needle = is_scalar($raw) ? (string)$raw : null;
         $haystack = array_map(static fn(mixed $choice): string => (string)$choice, $choices);
-        if ($needle === null || !in_array($needle, $haystack, strict: true)) {
+        $key = $needle === null ? false : array_search($needle, $haystack, strict: true);
+        if ($key === false) {
             return $this->state->fail($name, 'in');
         }
 
-        return $this->state->pass($name, $raw);
+        return $this->state->pass($name, $choices[$key]);
     }
 
     public function uuid(string $name, ?int $version = null, bool $optional = false): ?string

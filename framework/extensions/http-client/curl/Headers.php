@@ -8,6 +8,9 @@ use core\http\HeaderField;
 
 final class Headers
 {
+    /** Kept across origins; a denylist of credential names always misses a scheme (x-auth, x-signature). */
+    private const array CROSS_ORIGIN = ['accept', 'accept-encoding', 'accept-language', 'user-agent', 'cache-control', 'pragma'];
+
     /** @return array<string, scalar>|null */
     public static function normalize(mixed $headers): ?array
     {
@@ -31,24 +34,20 @@ final class Headers
      * @param array<int|string, scalar>|null $headers
      * @return array<int|string, scalar>|null
      */
-    public static function withoutSensitive(?array $headers): ?array
+    public static function forOtherOrigin(?array $headers): ?array
     {
         if ($headers === null) {
             return null;
         }
 
-        $filtered = [];
-        foreach ($headers as $key => $value) {
-            if (
-                is_string($key)
-                && in_array(strtolower($key), ['authorization', 'proxy-authorization', 'cookie'], strict: true)
-            ) {
-                continue;
+        $kept = [];
+        foreach ($headers as $name => $value) {
+            if (is_string($name) && in_array(strtolower($name), self::CROSS_ORIGIN, strict: true)) {
+                $kept[$name] = $value;
             }
-            $filtered[$key] = $value;
         }
 
-        return $filtered === [] ? null : $filtered;
+        return $kept === [] ? null : $kept;
     }
 
     /**

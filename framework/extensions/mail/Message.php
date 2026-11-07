@@ -98,11 +98,18 @@ final class Message
         $recipients = [];
 
         foreach ($items as $item) {
+            if (trim($item) === '') {
+                continue;
+            }
+
             $address = trim(self::extractAddress($item));
 
-            if ($address !== '' && filter_var($address, FILTER_VALIDATE_EMAIL) !== false) {
-                $recipients[] = $address;
+            // Dropping one address would still send, just not to everyone the caller named.
+            if (!Recipients::isAddress($address)) {
+                throw new InvalidArgumentException('INVALID_RECIPIENT');
             }
+
+            $recipients[] = $address;
         }
 
         if ($recipients === []) {
@@ -118,61 +125,20 @@ final class Message
      */
     private static function recipientItems(string|array $to): array
     {
-        return is_array($to) ? array_values($to) : self::splitRecipients($to);
-    }
-
-    /** @return list<string> */
-    private static function splitRecipients(string $value): array
-    {
-        $items = [];
-        $current = '';
-        $inQuotes = false;
-        $angleDepth = 0;
-        $length = strlen($value);
-
-        for ($i = 0; $i < $length; $i++) {
-            $char = $value[$i];
-            $prev = $i > 0 ? $value[$i - 1] : null;
-
-            if ($char === '"' && $prev !== '\\') {
-                $inQuotes = !$inQuotes;
-                $current .= $char;
-                continue;
-            }
-
-            if (!$inQuotes) {
-                if ($char === '<') {
-                    $angleDepth++;
-                    $current .= $char;
-                    continue;
-                }
-
-                if ($char === '>' && $angleDepth > 0) {
-                    $angleDepth--;
-                    $current .= $char;
-                    continue;
-                }
-
-                if ($char === ',' && $angleDepth === 0) {
-                    $items[] = $current;
-                    $current = '';
-                    continue;
-                }
-            }
-
-            $current .= $char;
+        if (!is_array($to)) {
+            return RecipientSyntax::items($to, split: true);
         }
 
-        $items[] = $current;
-
-        return $items;
+        // An array item is one recipient: a comma outside quotes in it refuses the call.
+        return array_map(static fn(string $item): string => RecipientSyntax::items($item, split: false)[0], array_values($to));
     }
 
     private static function extractAddress(string $value): string
     {
         $match = [];
 
-        return preg_match('/<([^>]+)>/', $value, $match) === 1 ? trim($match[1]) : trim($value);
+        // RFC 5322 name-addr: the angle-addr ends the item, so one inside the display name is not it.
+        return preg_match('/<([^<>]+)>\s*$/D', $value, $match) === 1 ? trim($match[1]) : trim($value);
     }
 
     /** @return array{filename: string, encodedFilename: string, mimeType: string, data: string} */

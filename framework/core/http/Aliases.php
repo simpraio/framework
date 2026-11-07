@@ -52,14 +52,17 @@ final readonly class Aliases
         }
 
         $pathId = $route->pathId();
-        return array_find_key(
+        $path = array_find_key(
             $this->map($route->language),
             static fn($target) => $target['module'] . '/' . $target['controller'] === $pathId
         );
+
+        // An all-digit path such as 2024 is an integer key in the map.
+        return $path === null ? null : (string)$path;
     }
 
     /**
-     * @return array<string, array{module: string, controller: string}>
+     * @return array<array-key, array{module: string, controller: string}>
      */
     private function map(string $language): array
     {
@@ -73,7 +76,7 @@ final readonly class Aliases
     }
 
     /**
-     * @return array<string, array{module: string, controller: string}>
+     * @return array<array-key, array{module: string, controller: string}>
      */
     private function fetch(string $language): array
     {

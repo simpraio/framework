@@ -20,8 +20,8 @@ When enabled, the Boot hook's `after()` method appends the timing report as an H
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Profiler::mark($label)` | `void` | Records a named timestamp at the current moment. Labels are free-form strings - use them to describe what just completed. |
-| `Profiler::report()` | `string` | Returns the timing report as an HTML comment string. Called automatically by the Boot hook - you rarely need this directly. |
+| `Profiler::mark($label)` | `void` | Records a named timestamp at the current moment. Labels are free-form strings - use them to describe what just completed. Throws `RuntimeException('PROFILER_DISABLED')` when the profiler is disabled. |
+| `Profiler::report()` | `string` | Returns the timing report as an HTML comment string. Called automatically by the Boot hook - you rarely need this directly. Throws `RuntimeException('PROFILER_DISABLED')` when the profiler is disabled. |
 
 Labels are HTML-encoded so their text cannot terminate the report's comment or emit markup.
 
@@ -58,3 +58,19 @@ public function compose(Template $template): Template|Response
 ```
 
 The Boot hook appends the comment automatically - no need to call `report()` yourself.
+
+## Marks in production
+
+A disabled profiler refuses `mark()` rather than ignoring it, so a mark left in a controller
+turns every request through it into an error once the profiler is switched off, as it should
+be in production. Remove marks before the code ships, or guard a mark you want to keep:
+
+```
+use core\config\Config as CoreConfig;
+use extensions\profiler\Config as ProfilerConfig;
+use extensions\profiler\Profiler;
+
+if (CoreConfig::extensionConfig(ProfilerConfig::NAME, ProfilerConfig::class)->enabled) {
+    Profiler::mark('after db');
+}
+```

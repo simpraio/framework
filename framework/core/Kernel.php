@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace core;
 
+use core\cache\OnceFile;
 use core\config\Config;
 use core\db\Connection;
 use core\db\Db;
@@ -31,8 +32,14 @@ final class Kernel
 
     public static function boot(string $basePath): self
     {
+        // Config, timezone and log failures below happen before ErrorHandler::register(); PHP must
+        // not print them, nor keep call arguments - a config value or credential - in their traces.
+        ini_set(option: 'display_errors', value: '0');
+        ini_set(option: 'zend.exception_ignore_args', value: '1');
+
         $paths = new Paths($basePath);
         Instance::init($paths->base);
+        OnceFile::init($paths->bundleDir);
         Config::init($paths);
         self::setTimezone(Config::project()->timezone);
 
@@ -45,6 +52,7 @@ final class Kernel
             rotateDaily: $logConfig->rotateDaily,
             retentionDays: $logConfig->retentionDays,
             redactKeys: $logConfig->redactKeys,
+            secrets: Config::secrets(...),
         ));
         $container->bind(Connection::class, static fn(): Connection => new Connection(Config::database()));
         $container->bind(SessionStore::class, static fn(): SessionStore => new SessionStore(Config::session()));
@@ -138,8 +146,10 @@ final class Kernel
     private function controllerClass(ResolvedRoute $route): string
     {
         $base = str_replace(search: '-', replace: '', subject: ucwords($route->controller, separators: '-'));
+        // A hyphenated module directory holds an underscored namespace, as an extension's does.
+        $module = str_replace(search: '-', replace: '_', subject: $route->module);
 
-        return self::MODULES_NS . $route->module . '\\' . $base;
+        return self::MODULES_NS . $module . '\\' . $base;
     }
 
     private function dispatch(ResolvedRoute $route): Template|Response
@@ -152,6 +162,12 @@ final class Kernel
 
         if ($hasController) {
             $instance = $this->makeController($controllerClass, $route);
+            // Class names are case-insensitive, so con-crete finds Concrete once it is loaded - and on a
+            // case-insensitive filesystem loads it. Only the declared spelling is the controller's path.
+            // The namespace is left out: its module segment is a lowercased URL segment either way.
+            if (strrchr($instance::class, needle: '\\') !== strrchr($controllerClass, needle: '\\')) {
+                throw new HttpException(404);
+            }
             $template = $hasTemplate ? $view->load($templatePath) : new Template();
             $result = $instance->compose($template);
 

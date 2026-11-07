@@ -7,6 +7,17 @@ namespace core\config;
 final class Map
 {
     /**
+     * A map of settings, as opposed to a list or a scalar. `[]` is neither map nor list: PHP cannot tell
+     * which it was meant to be, so the caller decides.
+     *
+     * @phpstan-assert-if-true non-empty-array<array-key, mixed> $value
+     */
+    public static function isMap(mixed $value): bool
+    {
+        return is_array($value) && $value !== [] && !array_is_list($value);
+    }
+
+    /**
      * @param array<string, mixed> $raw
      * @return array<string, mixed>
      */

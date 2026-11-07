@@ -6,6 +6,7 @@ namespace extensions\ratelimit;
 
 use core\config\Cast;
 use core\config\Config as CoreConfig;
+use InvalidArgumentException;
 
 final readonly class Config
 {
@@ -21,10 +22,21 @@ final readonly class Config
     /** @param array<string, mixed> $raw */
     public static function fromArray(array $raw): self
     {
+        $max = Cast::int($raw['max'] ?? null, 'extensions.ratelimit.max', 60);
+        if ($max < 1) {
+            throw new InvalidArgumentException('extensions.ratelimit.max must be at least 1.');
+        }
+
+        // A window of 0 stores a counter that never expires.
+        $window = Cast::int($raw['window'] ?? null, 'extensions.ratelimit.window', 60);
+        if ($window < 1) {
+            throw new InvalidArgumentException('extensions.ratelimit.window must be at least 1 second.');
+        }
+
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.ratelimit.enabled', true),
-            max:     Cast::int($raw['max'] ?? null,     'extensions.ratelimit.max',     60),
-            window:  Cast::int($raw['window'] ?? null,  'extensions.ratelimit.window',  60),
+            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.ratelimit.enabled', false),
+            max:     $max,
+            window:  $window,
         );
     }
 

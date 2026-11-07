@@ -14,30 +14,30 @@
     <div class="status">HTTP {STATUS}</div>
     <h1>{TITLE}</h1>
 
-    {is403}
+    {Is403}
     <p>You do not have permission to access this page.</p>
-    {-is403}
+    {-Is403}
 
-    {is404}
+    {Is404}
     <p>The requested route does not exist.</p>
-    {-is404}
+    {-Is404}
 
-    {isBug}
+    {IsBug}
     <p>Something in the request path failed before the response could be completed.</p>
     <div class="meta">
         <p>Reference: <strong>{REFERENCE}</strong></p>
         <p>Generated: <strong>{DATE}</strong></p>
-        {isNotDebug}
+        {IsNotDebug}
         <p>The error has been recorded for review.</p>
-        {-isNotDebug}
-        {isDebug}
+        {-IsNotDebug}
+        {IsDebug}
         <p>{ERROR}</p>
         <p>File: <code>{FILE}</code></p>
         <p>Line: <strong>{LINE}</strong></p>
         <pre class="trace">{TRACE}</pre>
-        {-isDebug}
+        {-IsDebug}
     </div>
-    {-isBug}
+    {-IsBug}
 
     <p>Requested URL: <strong>{URL}</strong></p>
     <p><a href="/">Return to homepage</a></p>

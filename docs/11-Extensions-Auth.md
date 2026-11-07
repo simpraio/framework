@@ -9,10 +9,10 @@ return [
     'extensions' => [
         'auth' => [
             'enabled'               => false,
-            'session_key'           => 'user.data',    // session key where user data is stored
+            'session_key'           => 'user.data',    // session key where user data is stored; must not be empty
             'guest_group'           => 'guest',        // group name for unauthenticated users
             'logout_redirect'       => '',             // path to redirect after logout
-            'login_attempts'        => 5,             // max failed logins before lockout
+            'login_attempts'        => 5,             // max attempts per account and address before lockout
             'login_attempts_window' => 900,           // lockout window in seconds (15 min)
             'revalidate_interval'   => 60,            // minimum seconds between request-driven DB checks
             'default_policy'        => 'deny',        // 'allow' or 'deny' for uncontrolled routes
@@ -79,6 +79,17 @@ ASCII control characters or DEL are invalid and fail during configuration loadin
 
 The `auth_group`, `auth_user`, and `auth_access` database tables are required once auth is enabled. Schemas are in `tools/schema/auth.sql`.
 
+With `default_policy => 'deny'` the sign-in route needs an `allow` row of its own: it is
+uncontrolled until one exists, so a guest redirected to `guest_route` is refused there as well
+and redirected to it again, in a loop. The sign-out route needs one too, or a signed-in user is
+refused it. For the example in `tools/examples/auth/`, where `guest_route` is `login`:
+
+```sql
+INSERT INTO auth_access (path_id, block, user_id, group_id, policy) VALUES
+    ('main/login', '', 0, 0, 'allow'),
+    ('main/logout', '', 0, 0, 'allow');
+```
+
 `created_at`, `updated_at`, and `last_login_at` represent instants and are stored as UTC
 `DATETIME(6)` values. Convert them to the user's display timezone only after reading. Projects
 upgrading from v4 must convert existing values as described in [UPGRADING.md](../UPGRADING.md).
@@ -91,11 +102,11 @@ The next request that reads auth state after `revalidate_interval` has elapsed s
 - Setting `status` to `disabled` or `deleted` ends the user's existing sessions at their next revalidation, not just future logins.
 - A group change takes effect at the next revalidation; the user does not have to log out and back in.
 
-Login upgrades bcrypt hashes whose cost is below PHP's default, preserving higher bcrypt costs and other supported algorithms such as Argon2. The rehash update matches the original credential: if a reset, deletion, or another rehash wins the race, login immediately returns `false` without changing the session, clearing throttling, or stamping `last_login_at`. A retry can succeed after another login's rehash.
+Login upgrades bcrypt hashes whose cost is below PHP's default, preserving higher bcrypt costs and other supported algorithms such as Argon2. The rehash update matches the original credential, and a login that loses the race reads the account again: if another login's rehash won, the password still verifies against the new hash and the login succeeds bound to it; if a reset or a deletion won, or the account was disabled or replaced meanwhile, login returns `false` without changing the session, clearing throttling, or stamping `last_login_at`.
 
 This immediate race check applies only when rehashing. Without a rehash, a password reset between reading the credential and issuing the session is detected through the fingerprint at the next revalidation, not immediately. The interval is therefore not an unconditional wall-clock revocation deadline.
 
-Failed logins are throttled on two counters, both keyed on the request's source address: `login_attempts` failures for one `(username + IP)` pair, and four times that for the address as a whole. Nothing is counted per username alone, so a third party cannot lock an account out by failing logins against it from elsewhere. The address is `REMOTE_ADDR`, never a forwarded-for header, so it cannot be spoofed from outside - but that also means a deployment where PHP sees a proxy instead of the client shares one address counter across all users, and the address must be corrected at the front end for the limiter to distinguish them.
+Logins are throttled on two counters, both keyed on the request's source address: `login_attempts` attempts for one account from one address, and four times that for the address as a whole. Every attempt is counted before its password is checked, and no attempt that reaches the account counter answers faster than a check against a missing account does - a refused one, one against an account whose stored hash is cheaper than the default bcrypt cost, and one against an unusable stored value are all brought up to that time - so a quick answer shows neither that an account exists nor that it holds a cheap hash. Refusals that come before the account is looked up - an empty password, one with a NUL byte, an address over its limit - answer at once, the same whichever account was named. A bcrypt hash costlier than the default, or another algorithm such as Argon2, answers in its own time, which a miss cannot imitate; keep stored hashes at the default cost if that matters. Counting comes first so a burst of concurrent attempts cannot all get past a limit none of them has counted yet; a successful one clears the account's count and hands its own count on the address back, so the address's budget is spent only by failures. The account counter follows the account, not the spelling - `admin`, `Admin` and `admin ` match one row and share one counter - and a name that matches no account is counted lower-cased, without trailing spaces. Nothing is counted per username alone, so a third party cannot lock an account out by failing logins against it from elsewhere. The address is `REMOTE_ADDR`, never a forwarded-for header, so it cannot be spoofed from outside - but that also means a deployment where PHP sees a proxy instead of the client shares one address counter across all users, and the address must be corrected at the front end for the limiter to distinguish them.
 
 Counters live in APCu when available, otherwise in locked files under the system temp directory. Both are host-local, so behind several front-ends each one throttles independently.
 
@@ -130,7 +141,7 @@ may still hold a handle to an unlinked file and lose a newly recorded failed att
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Auth::login($username, $password)` | `bool` | Validates credentials and rotates the session on success (`Session::rotate()`: new ID, CSRF token dropped). Returns `false` on bad credentials, lockout, a disabled account, or a lost rehash race. Invalid credentials and disabled-account attempts count toward throttling; a lost rehash race does not. |
+| `Auth::login($username, $password)` | `bool` | Validates credentials and rotates the session on success (`Session::rotate()`: new ID, CSRF token dropped). Returns `false` on bad credentials, lockout, a disabled account, or a password reset that lands while it rehashes the stored password; another login's rehash of the same password does not refuse it. Every attempt counts toward throttling until one succeeds. |
 | `Auth::logout(?string $route = null)` | `Response` | Destroys the session and redirects to `logout_redirect`, or to `$route` when provided. |
 | `User::current()` | `object` | Returns the current session user object, or a guest object with `user_id = 0`. |
 | `User::isAuthenticated()` | `bool` | Returns `true` when a user is logged in (user_id > 0). |

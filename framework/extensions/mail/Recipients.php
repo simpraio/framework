@@ -7,10 +7,17 @@ namespace extensions\mail;
 use InvalidArgumentException;
 
 /**
- * Both transports write these addresses directly; validation prevents command/header injection.
+ * Both transports write these addresses directly into a command or header line, so an address must
+ * hold no control character as well as be valid.
  */
 final class Recipients
 {
+    /** FILTER_VALIDATE_EMAIL admits a quoted-pair holding any ASCII byte, a line feed included. */
+    public static function isAddress(string $address): bool
+    {
+        return filter_var($address, FILTER_VALIDATE_EMAIL) !== false && preg_match('/[\x00-\x1F\x7F]/', $address) !== 1;
+    }
+
     /**
      * @param list<string> $recipients
      * @return non-empty-list<string>
@@ -26,7 +33,7 @@ final class Recipients
         foreach ($recipients as $recipient) {
             $recipient = trim($recipient);
 
-            if (filter_var($recipient, FILTER_VALIDATE_EMAIL) === false) {
+            if (!self::isAddress($recipient)) {
                 throw new InvalidArgumentException('INVALID_ENVELOPE_RECIPIENT');
             }
 

@@ -8,6 +8,8 @@ return [
             'enabled' => false,
             'retries' => 5,
             'retry_delay' => 1,
+
+            // Seconds for the whole call: every attempt, retry delay and redirect hop together.
             'timeout' => 60,
             'connect_timeout' => 10,
 

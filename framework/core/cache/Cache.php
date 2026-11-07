@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace core\cache;
 
 use core\Instance;
-use core\tools\Silently;
 use stdClass;
 
 /**
@@ -99,7 +98,7 @@ final class Cache
     {
         $apcu = self::apcu();
         if (!$apcu->enabled()) {
-            return self::onceFile($key, $callback, $ttl);
+            return OnceFile::run($key, $callback, $ttl);
         }
 
         if (self::get($key) === true) {
@@ -120,51 +119,6 @@ final class Cache
         }, $lockTtl, $waitSeconds);
 
         return $ran;
-    }
-
-    /**
-     * Host-local fallback. Runs unguarded if the sentinel cannot be opened.
-     */
-    private static function onceFile(string $key, callable $callback, int $ttl): bool
-    {
-        $path = sys_get_temp_dir() . '/cache-once-' . sha1(Instance::prefix() . $key);
-        $now = time();
-
-        clearstatcache(true, $path);
-        $existed = file_exists($path);
-        if ($existed && $ttl > 0) {
-            $mtime = Silently::call(static fn(): int|false => filemtime($path));
-            if ($mtime !== false && ($now - $mtime) < $ttl) {
-                return false;
-            }
-        }
-
-        $fp = Silently::call(static fn() => fopen(filename: $path, mode: 'c'));
-        if ($fp === false) {
-            $callback();
-            return true;
-        }
-
-        try {
-            if (!flock($fp, LOCK_EX | LOCK_NB)) {
-                return false;
-            }
-
-            if ($existed && $ttl > 0) {
-                clearstatcache(true, $path);
-                $mtime = Silently::call(static fn(): int|false => filemtime($path));
-                if ($mtime !== false && ($now - $mtime) < $ttl) {
-                    return false;
-                }
-            }
-
-            $callback();
-            Silently::call(static fn(): bool => touch($path));
-            return true;
-        } finally {
-            flock($fp, LOCK_UN);
-            fclose($fp);
-        }
     }
 
     /**

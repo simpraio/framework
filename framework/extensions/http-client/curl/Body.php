@@ -14,8 +14,10 @@ final class Body
     /** @return array<int, mixed> */
     public static function options(RequestOptions $options): array
     {
-        if (!self::hasData($options->data) && !$options->raw) {
-            return [];
+        // raw only says how data is sent, so without data a raw request is framed like any other.
+        if (!self::hasData($options->data)) {
+            // Without it cURL sends a bodiless POST chunked and a PUT or PATCH with no length at all.
+            return in_array($options->method, ['POST', 'PUT', 'PATCH'], strict: true) ? [CURLOPT_POSTFIELDS => ''] : [];
         }
 
         $curl = [

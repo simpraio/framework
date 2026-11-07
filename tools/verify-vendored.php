@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 /**
  * Usage: php tools/verify-vendored.php <path-to-project>
- * Compares working-tree content through each repository's Git filters, not raw disk bytes.
+ * Compares the blobs committed at HEAD on both sides, as `git ls-tree -r HEAD` lists them: blob ids
+ * hash content after each repository's own line-ending normalisation, and paths are matched exactly,
+ * letter case included. A vendored file that exists on disk but is not committed is reported as
+ * missing, and uncommitted edits are not seen at all: commit a re-vendor before verifying it.
  * Exit codes: 0 in sync, 1 drift found, 2 usage or environment error.
  */
 
@@ -43,40 +46,51 @@ const VENDORED_HANDBOOK = [
     'CLAUDE.md',
 ];
 
+/**
+ * What CLAUDE.md must hold, as AGENTS.md defines it. Compared against this rather than the
+ * framework's own copy, which its repository does not commit: a fresh clone has none, and a damaged
+ * one would become the reference.
+ */
+const HANDBOOK_POINTER = ['CLAUDE.md' => "@AGENTS.md\n"];
+
 $frameworkRoot = dirname(__DIR__);
 $projectRoot = $argv[1] ?? null;
 
 if ($projectRoot === null) {
-    $usage = "usage: php tools/verify-vendored.php <path-to-project>\n";
-    fwrite(STDERR, $usage);
+    fwrite(STDERR, data: "usage: php tools/verify-vendored.php <path-to-project>\n");
     exit(2);
 }
 
 $projectRoot = realpath($projectRoot);
-if ($projectRoot === false || !is_dir($projectRoot . '/.git')) {
-    fwrite(STDERR, "not a git checkout: " . ($argv[1] ?? '') . "\n");
+if ($projectRoot === false || !file_exists($projectRoot . '/.git')) {
+    fwrite(STDERR, 'not a git checkout: ' . ($argv[1] ?? '') . "\n");
     exit(2);
 }
 
 /**
- * Git failures are environment errors, never evidence of an absent vendored file. Stderr is
- * kept apart from the output: a warning or GIT_TRACE line merged into a path list would turn
- * the first path into one that matches nothing, and that file would drop out of the check.
+ * Git failures are environment errors, never evidence of an absent vendored file. Stderr goes to
+ * a file, kept apart from the output: a warning or GIT_TRACE line merged into the listing would
+ * turn the first path into one that matches nothing, and reading two pipes in turn can deadlock.
  */
 function git(string $repo, string $args): string
 {
     $errors = tmpfile();
-    $command = 'git -C ' . escapeshellarg($repo) . ' ' . $args;
-    $process = $errors === false ? false : proc_open($command, [1 => ['pipe', 'w'], 2 => $errors], $pipes);
-    if (!is_resource($process)) {
+    if ($errors === false) {
+        fwrite(STDERR, "git failed in {$repo}: no temporary file for {$args}\n");
+        exit(2);
+    }
+
+    $pipes = [];
+    $process = proc_open('git -C ' . escapeshellarg($repo) . ' ' . $args, [1 => ['pipe', 'w'], 2 => $errors], $pipes);
+    if (!is_resource($process) || !is_resource($pipes[1] ?? null)) {
         fwrite(STDERR, "git failed in {$repo}: could not start {$args}\n");
         exit(2);
     }
-    $result = (string)stream_get_contents($pipes[1]);
+    $result = (string) stream_get_contents($pipes[1]);
     fclose($pipes[1]);
     if (proc_close($process) !== 0) {
         rewind($errors);
-        fwrite(STDERR, "git failed in {$repo}: {$args}\n" . trim((string)stream_get_contents($errors)) . "\n");
+        fwrite(STDERR, "git failed in {$repo}: {$args}\n" . trim((string) stream_get_contents($errors)) . "\n");
         exit(2);
     }
 
@@ -84,50 +98,74 @@ function git(string $repo, string $args): string
 }
 
 /**
- * Content hashes of working-tree files, with the owning repository's filters applied; null for
- * a path that is not a file. Paths go to git a hundred at a time, because starting a process is
- * expensive on Windows and a project has hundreds of vendored files.
+ * Every file committed at HEAD, by exact path.
  *
- * @param list<string> $paths
- * @return array<string, ?string>
+ * @return array<int|string, string> path => blob id; numeric filenames become integer keys
  */
-function blobHashes(string $repo, array $paths): array
+function committedBlobs(string $repo): array
 {
-    $hashes = array_fill_keys($paths, null);
-    $files = array_values(array_filter($paths, static fn(string $path): bool => is_file($repo . '/' . $path)));
-
-    foreach (array_chunk($files, 100) as $chunk) {
-        // Stderr goes to a file: reading two pipes in turn can deadlock once git fills the second.
-        $errors = tmpfile();
-        $process = $errors === false
-            ? false
-            : proc_open(['git', '-C', $repo, 'hash-object', '--', ...$chunk], [1 => ['pipe', 'w'], 2 => $errors], $pipes);
-        if (!is_resource($process)) {
-            fwrite(STDERR, "git failed in {$repo}: could not start hash-object\n");
-            exit(2);
-        }
-        $output = (string)stream_get_contents($pipes[1]);
-        fclose($pipes[1]);
-        $lines = $output === '' ? [] : explode("\n", trim($output));
-        if (proc_close($process) !== 0 || count($lines) !== count($chunk)) {
-            rewind($errors);
-            fwrite(STDERR, "git failed in {$repo}: hash-object\n" . trim((string)stream_get_contents($errors)) . "\n");
-            exit(2);
-        }
-        foreach ($chunk as $index => $path) {
-            $hashes[$path] = trim($lines[$index]);
+    $blobs = [];
+    foreach (explode("\0", git($repo, args: 'ls-tree -r -z --full-tree HEAD')) as $entry) {
+        $match = [];
+        if (preg_match('/^[0-7]+ blob ([0-9a-f]+)\t(.+)$/sD', $entry, $match) === 1) {
+            $blobs[$match[2]] = $match[1];
         }
     }
 
-    return $hashes;
+    return $blobs;
 }
 
-git($frameworkRoot, args: 'rev-parse --git-dir');
+/** The blob id git gives $content, in $repo's object format. */
+function blobOf(string $repo, string $content): string
+{
+    $file = tempnam(sys_get_temp_dir(), prefix: 'vv-');
+    if ($file === false || file_put_contents($file, $content) === false) {
+        fwrite(STDERR, data: "cannot write a temporary file to hash\n");
+        exit(2);
+    }
+    $id = trim(git($repo, args: 'hash-object --no-filters ' . escapeshellarg($file)));
+    unlink($file);
 
-// Generic tests are optional, but must match in full once adopted.
+    return $id;
+}
+
+/**
+ * @param array<int|string, string> $blobs
+ * @return list<string>
+ */
+function pathsUnder(array $blobs, string $subtree): array
+{
+    return array_values(array_filter(
+        array_map(strval(...), array_keys($blobs)),
+        static fn(string $path): bool => str_starts_with($path, $subtree . '/'),
+    ));
+}
+
+$ours = committedBlobs($frameworkRoot);
+$theirs = committedBlobs($projectRoot);
+
+/** @var array<int|string, string> $theirsFolded lower-cased path => committed path, to name a case-only rename */
+$theirsFolded = [];
+foreach (array_map(strval(...), array_keys($theirs)) as $path) {
+    $theirsFolded[strtolower($path)] = $path;
+}
+
+/**
+ * Why a vendored path is absent from the project's commit, when there is more to say than that.
+ */
+$absence = static function (string $path) use ($theirsFolded, $projectRoot): string {
+    $folded = $theirsFolded[strtolower($path)] ?? null;
+    if ($folded !== null) {
+        return " (committed as {$folded})";
+    }
+
+    return file_exists($projectRoot . '/' . $path) ? ' (not committed)' : '';
+};
+
+// Generic tests are optional, but must match in full once adopted, committed or not.
 $adoptedTests = false;
 foreach (VENDORED_FILES as $marker) {
-    if (is_file($projectRoot . '/' . $marker)) {
+    if (array_key_exists($marker, $theirs) || is_file($projectRoot . '/' . $marker)) {
         $adoptedTests = true;
         break;
     }
@@ -138,45 +176,33 @@ $drift = [];
 $missing = [];
 $extra = [];
 $skipped = [];
-/** @var array<string, string> $pairs framework path => project path, compared after hashing */
+/** @var array<string, string> $pairs framework path => project path */
 $pairs = [];
 
-/**
- * One ls-files call per repository for every subtree, then each subtree's own entries.
- *
- * @param list<string> $subtrees
- * @return array<string, list<string>>
- */
-$tracked = static function (string $repo, array $subtrees): array {
-    $listed = git($repo, 'ls-files -z -- ' . implode(' ', array_map('escapeshellarg', $subtrees)));
-    $paths = $listed === '' ? [] : explode("\0", rtrim($listed, "\0"));
-    $bySubtree = [];
-    foreach ($subtrees as $subtree) {
-        $bySubtree[$subtree] = array_values(array_filter($paths, static fn(string $path): bool => str_starts_with($path, $subtree . '/')));
-    }
-    return $bySubtree;
-};
-$frameworkTracked = $tracked($frameworkRoot, array_keys(VENDORED));
-$projectTracked = $tracked($projectRoot, array_values(VENDORED));
+// A framework checkout that ships no tests/ - a production export - has no suite to compare a
+// project's against, which is not the same as a project missing it.
+$frameworkHasTests = pathsUnder($ours, subtree: 'tests/core') !== [];
+$compareTests = $adoptedTests && $frameworkHasTests;
 
 foreach (VENDORED as $fromSubtree => $toSubtree) {
-    if (!$adoptedTests && str_starts_with($fromSubtree, 'tests/')) {
+    if (!$compareTests && str_starts_with($fromSubtree, 'tests/')) {
         continue;
     }
 
-    if ($frameworkTracked[$fromSubtree] === []) {
-        fwrite(STDERR, "nothing tracked under {$fromSubtree} — is this a framework checkout?\n");
+    $frameworkPaths = pathsUnder($ours, $fromSubtree);
+    if ($frameworkPaths === []) {
+        fwrite(STDERR, "nothing committed under {$fromSubtree} — is this a framework checkout?\n");
         exit(2);
     }
 
-    foreach ($frameworkTracked[$fromSubtree] as $frameworkPath) {
+    foreach ($frameworkPaths as $frameworkPath) {
         $relative = substr($frameworkPath, strlen($fromSubtree) + 1);
         $projectPath = $toSubtree . '/' . $relative;
 
-    // Absent extensions are optional; partially vendored extensions are drift.
+        // Absent extensions are optional; partially vendored or uncommitted extensions are drift.
         if ($fromSubtree === 'framework/extensions') {
             $extension = explode('/', $relative)[0];
-            if (!is_dir($projectRoot . '/extensions/' . $extension)) {
+            if (pathsUnder($theirs, 'extensions/' . $extension) === [] && !is_dir($projectRoot . '/extensions/' . $extension)) {
                 $skipped[$extension] = true;
                 continue;
             }
@@ -185,32 +211,27 @@ foreach (VENDORED as $fromSubtree => $toSubtree) {
         $pairs[$frameworkPath] = $projectPath;
     }
 
-    foreach ($projectTracked[$toSubtree] as $projectPath) {
-        $relative = substr($projectPath, strlen($toSubtree) + 1);
-        if (!is_file($frameworkRoot . '/' . $fromSubtree . '/' . $relative)) {
+    foreach (pathsUnder($theirs, $toSubtree) as $projectPath) {
+        if (!array_key_exists($fromSubtree . substr($projectPath, strlen($toSubtree)), $ours)) {
             $extra[] = $projectPath;
         }
     }
 }
 
-if ($adoptedTests) {
+if ($compareTests) {
     foreach (VENDORED_FILES as $path) {
         $pairs[$path] = $path;
     }
 } else {
-    $skipped['generic test suite (not adopted)'] = true;
+    $skipped[$adoptedTests ? 'generic test suite (not in the framework)' : 'generic test suite (not adopted)'] = true;
 }
 
-$handbook = array_combine(VENDORED_HANDBOOK, VENDORED_HANDBOOK);
-$ours = blobHashes($frameworkRoot, array_keys($pairs + $handbook));
-$theirs = blobHashes($projectRoot, array_values($pairs + $handbook));
-
 foreach ($pairs as $frameworkPath => $projectPath) {
-    if ($theirs[$projectPath] === null) {
-        $missing[] = $projectPath;
+    if (!array_key_exists($projectPath, $theirs)) {
+        $missing[] = $projectPath . $absence($projectPath);
         continue;
     }
-    if ($ours[$frameworkPath] === $theirs[$projectPath]) {
+    if (($ours[$frameworkPath] ?? null) === $theirs[$projectPath]) {
         $same++;
         continue;
     }
@@ -219,8 +240,20 @@ foreach ($pairs as $frameworkPath => $projectPath) {
 }
 
 foreach (VENDORED_HANDBOOK as $path) {
-    if ($theirs[$path] === null) {
-        $skipped[$path . ' (not adopted)'] = true;
+    if (array_key_exists($path, HANDBOOK_POINTER)) {
+        $ours[$path] = blobOf($frameworkRoot, HANDBOOK_POINTER[$path]);
+    }
+    if (!array_key_exists($path, $ours)) {
+        $skipped[$path . ' (not in the framework)'] = true;
+        continue;
+    }
+    if (!array_key_exists($path, $theirs)) {
+        $reason = $absence($path);
+        if ($reason === '') {
+            $skipped[$path . ' (not adopted)'] = true;
+            continue;
+        }
+        $missing[] = $path . $reason;
         continue;
     }
     if ($ours[$path] === $theirs[$path]) {
@@ -238,6 +271,12 @@ printf("  missing in project   %d\n", count($missing));
 printf("  extra in project     %d\n", count($extra));
 if ($skipped !== []) {
     printf("  not vendored here: %s\n", implode(', ', array_keys($skipped)));
+}
+// Committed content is what is compared; say so when the working tree holds something else.
+$vendoredPaths = ['core', 'extensions', 'tests/core', 'tests/extensions', 'tests/integration', ...VENDORED_FILES, ...VENDORED_HANDBOOK];
+$uncommitted = trim(git($projectRoot, args: 'status --porcelain -- ' . implode(' ', array_map(escapeshellarg(...), $vendoredPaths))));
+if ($uncommitted !== '') {
+    echo "  note: uncommitted changes under vendored paths are not compared - commit them first\n";
 }
 echo "\n";
 

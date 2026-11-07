@@ -18,7 +18,7 @@ Make sure you have the following before starting:
 - **PHP 8.4+** - verify your version with `php -v`. Available via `brew install php` on macOS or `apt install php8.4` on Debian/Ubuntu. On Windows, use [windows.php.net](https://windows.php.net/download/) or a package like XAMPP.
 - **PHP mbstring extension** - required for UTF-8 text handling. On Debian/Ubuntu, install the package matching your PHP version, such as `php8.4-mbstring`.
 - **Git** - required to clone the framework. Verify with `git --version`.
-- **APCu** - optional for basic pages, but highly recommended in production. It provides the shared cache tier for templates, asset versions, route aliases, SEO, translation, registry, auth access checks, auth group lookups, and error-log purge guards. It is currently required only by the optional `ratelimit` extension; auth login throttling falls back to locked local files when APCu is unavailable.
+- **APCu** - optional for basic pages, but highly recommended in production. It provides the shared cache tier for templates, asset versions, route aliases, SEO, translation, registry, login-throttling and rate-limit counters, and the once-a-day guards of the log prune and the error-log purge. It is currently required only by the optional `ratelimit` extension; auth login throttling falls back to locked local files when APCu is unavailable.
 - **MySQL 8+ or MariaDB 11+** - only needed when DB-backed extensions are enabled. You can skip this for a basic setup and add it later.
 
 ## Setup Steps

@@ -34,7 +34,7 @@ final readonly class Envelope
         $normalized = Recipients::normalize($recipients);
         $sender = $fromEmail !== null ? trim($fromEmail) : self::senderFromHeader($headers);
 
-        if ($sender !== null && filter_var($sender, FILTER_VALIDATE_EMAIL) === false) {
+        if ($sender !== null && !Recipients::isAddress($sender)) {
             throw new InvalidArgumentException('INVALID_ENVELOPE_SENDER');
         }
 

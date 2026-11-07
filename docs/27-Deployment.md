@@ -115,6 +115,25 @@ chmod 755 cache/ logs/
 chmod 775 cache/ logs/
 ```
 
+The bundles in `cache/` hold the committed `config/*.php` and the framework's own code, never
+`framework.local.php` or environment variables, which are read on every request. They are written
+owner-only (`0600`) all the same: a project that commits a value it should not would expose it there,
+and a bundle is PHP the framework executes. For the same reason the bundle directory must not be
+writable by any other account - a file another account places there runs as the web server - so never
+point `SIMPRA_BUNDLE_DIR` at a shared directory such as `/tmp`. An account that cannot read a bundle rebuilds it, and that needs write access to
+the bundle directory. When the web server and CLI jobs run under different accounts, this applies in
+both directions: the web server rebuilds bundles a CLI job built, and a CLI job rebuilds bundles the web
+server built. An account without write access fails with `Bundle: cannot write temporary file` - every
+request, or every run of the job. With `chmod 755 cache/` owned by the web server, that is the CLI job.
+Either run CLI jobs as the web server's account, or give both write access through a shared group
+(`chmod 2770 cache/`); in the second case each rebuilds the bundles whenever it runs after the other.
+New log files are closed to other accounts but keep the group bits the umask
+allows: `0640` under `022`, `0660` under `002`. A shared group therefore needs umask `002` for both
+accounts. Under `022` neither can append to a log the other created. Without APCu, the same holds for
+a `Cache::once()` sentinel in `cache/`: only the account that created it can write it, so once it
+expires the other account runs the work it throttles, such as the daily log prune, on every call until
+the creator runs it again.
+
 Both directories must be outside the web root - `cache/` and `logs/` are in the project root, which is one level above `public/`, so they are never directly accessible via HTTP. Do not move them inside `public/`.
 
 ## Updating Code or Configuration
@@ -125,7 +144,10 @@ The framework compiles `config/*.php`, the extension map, and the core class lis
 rm -f cache/*.php
 ```
 
-`tools/clear-cache.php` clears application cache and APCu entries; it does not remove compiled
-bundle files and therefore does not replace this deployment step.
+`tools/clear-cache.php` deletes the framework's derived cache keys (templates, asset versions,
+route aliases, SEO, translation, registry) only from the APCu of the process running it. APCu is
+not shared between the CLI and the web server, so run from the shell it cannot reach the entries
+your site is serving: reload PHP-FPM or Apache to clear those. It does not remove compiled bundle
+files either, and therefore does not replace this deployment step.
 
-If you deploy new code over a populated bundle directory without clearing it, the previously compiled config keeps being served - silently, with no error. A renamed config section, a newly disabled extension, or a new security setting is ignored, and the affected config DTOs fall back to their code defaults. Because several extensions default to `enabled = true` in code (the shipped config files disable them), a stale bundle can **silently re-enable an extension you intended to keep off**. Make clearing the bundle directory a mandatory step in your deploy pipeline: run it after the new code is in place and before the first request is served.
+If you deploy new code over a populated bundle directory without clearing it, the previously compiled config keeps being served - silently, with no error. A renamed config section, a newly disabled extension, or a new security setting is ignored, and the affected config DTOs fall back to their code defaults. Those match the framework's shipped config files, not your project's, so a stale bundle can **silently undo a project setting**, such as an extension you switched on or a default you tightened. Make clearing the bundle directory a mandatory step in your deploy pipeline: run it after the new code is in place and before the first request is served.

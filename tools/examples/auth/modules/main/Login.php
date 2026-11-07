@@ -6,6 +6,7 @@ namespace modules\main;
 
 use core\Controller;
 use core\http\Response;
+use core\http\Url;
 use core\Request;
 use core\Template;
 use extensions\auth\Auth;
@@ -38,25 +39,15 @@ final class Login extends Controller
                 'RETURN_TO' => $returnTo,
             ])
             ->blocks([
-                'LOGIN_ERROR' => $hasError,
+                'HasLoginError' => $hasError,
             ]);
     }
 
     private function safeReturnTo(): ?string
     {
         $returnTo = Request::input('return') ?? Request::query('return');
-        if ($returnTo === null || $returnTo === '') {
-            return null;
-        }
 
-        if ($returnTo[0] !== '/'
-            || str_starts_with($returnTo, '//')
-            || str_starts_with($returnTo, '/\\')
-            || preg_match('/[\r\n\0]/', $returnTo) === 1
-        ) {
-            return null;
-        }
-
-        return $returnTo;
+        // The same check Response::redirect() applies: anything it would refuse is dropped here.
+        return $returnTo !== null && Url::isLocal($returnTo) ? $returnTo : null;
     }
 }

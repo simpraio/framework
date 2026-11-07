@@ -69,8 +69,12 @@ final readonly class TypedRules
 
         /** @var mixed $raw */
         $raw = $this->state->raw($name);
-        if (!is_string($raw) || $raw === '') {
+        if ($this->state->isBlank($raw)) {
             return $this->state->blank($name, $optional);
+        }
+
+        if (!is_string($raw)) {
+            return $this->state->fail($name, 'uuid');
         }
 
         $v = $version !== null ? (string)$version : '1-8';
@@ -86,8 +90,12 @@ final readonly class TypedRules
     {
         /** @var mixed $raw */
         $raw = $this->state->raw($name);
-        if (!is_string($raw) || $raw === '') {
+        if ($this->state->isBlank($raw)) {
             return $this->state->blank($name, $optional);
+        }
+
+        if (!is_string($raw)) {
+            return $this->state->fail($name, 'datetime');
         }
 
         // createFromFormat throws for a NUL instead of returning false.
@@ -95,8 +103,13 @@ final readonly class TypedRules
             return $this->state->fail($name, 'datetime');
         }
 
-        $dt = DateTimeImmutable::createFromFormat($format, $raw);
-        if ($dt === false || $dt->format($format) !== $raw) {
+        // Without ! or |, a field the format does not name takes the current time's value.
+        // Both are parse-only: format() would print them literally. A backslash escapes the next character,
+        // so ! or | is a marker after an even run of backslashes and a literal after an odd one.
+        $marker = '/(?<!\\\\)((?:\\\\\\\\)*)[!|]/';
+        $parseFormat = preg_match($marker, $format) === 1 ? $format : '!' . $format;
+        $dt = DateTimeImmutable::createFromFormat($parseFormat, $raw);
+        if ($dt === false || $dt->format(preg_replace($marker, replacement: '$1', subject: $format) ?? $format) !== $raw) {
             return $this->state->fail($name, 'datetime');
         }
 

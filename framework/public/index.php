@@ -10,7 +10,8 @@ $bundleDir = rtrim(
 );
 $cache = $bundleDir . '/core.php';
 
-if (is_file($cache)) {
+// Bundles are owner-only: one another account built cannot be read here, so it is rebuilt like a missing one.
+if (is_readable($cache)) {
     require $cache;
 }
 

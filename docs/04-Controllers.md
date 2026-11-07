@@ -84,7 +84,7 @@ array submitted under a key (`tags[]=a`) reads as the default, never as an array
 | `cookie($name, $default = null)` | `?string` | A cookie value. |
 | `file($key)` | `?array` | The `$_FILES` entry for `$key`, or `null`. It is not validated; check `error`, `size` and the type yourself. |
 | `ip()` | `string` | `REMOTE_ADDR`, or an empty string. Forwarding headers are not read: behind a proxy or load balancer this is the proxy's address. |
-| `isJson()` | `bool` | Whether `Content-Type` contains `application/json`. |
+| `isJson()` | `bool` | Whether the media type of `Content-Type` is `application/json` or an `application/*+json` type; its parameters, such as `charset`, are ignored. |
 | `json()` | `array` | The decoded JSON body, cached after the first successful decode. An empty body or a non-JSON `Content-Type` gives `[]`; a malformed body, or one that is not an object or array, throws `HttpException(400)` on every call. Nesting is limited by `project.max_json_depth`. |
 | `rawBody()` | `string` | The request body as received. |
 | `isSecure()` | `bool` | Whether `HTTPS` is set and not `off`, or the server port is 443. `X-Forwarded-Proto` is not read, so behind a TLS-terminating proxy this is `false` unless the server sets `HTTPS`. |
@@ -104,6 +104,12 @@ $isPost = Request::isMethod('POST');
 `header()`, `cookie()`, `file()`, `ip()`, `isJson()`, `json()`, `rawBody()`, `isSecure()` and
 `isAjax()`, each behaving as in the table above, and `instance()`, which returns the
 `core\http\Request` itself for `post()` and `rawMethod()`.
+
+Outside a web request - a CLI job handing work to a controller, or a test - build one directly:
+`new core\http\Request($query, $post, $cookies, $files, $server, $rawBody)` and pass it to
+`Request::init()`. `$rawBody` is the body as a string; `null` reads `php://input` when the body is
+first asked for, which is what `core\http\Request::capture()` does for the request PHP received. `json()` reads
+the body only when `isJson()` is true, and returns `[]` otherwise.
 
 ```
 // conditional template loading
@@ -150,6 +156,10 @@ You can also construct a response directly when you need full control over the C
 return new Response($csvBody, 200, 'text/csv; charset=UTF-8');
 ```
 
+`Response::isUncacheableError($status)` says whether no shared cache may keep a response with that status: true for every 4xx except 404 and 410 and for every 5xx, false for a 404, a 410 and every success or redirect. `Response::isVisitorBound()` says whether the current request has bound its response to whoever sent it, whatever the status: it used a session (also once closed or destroyed), carried credentials (a non-empty `Authorization` or Apache's `REDIRECT_HTTP_AUTHORIZATION` copy of it, PHP's parsed Basic or Digest credentials, or a server-authenticated `REMOTE_USER` or `REDIRECT_REMOTE_USER`), or set a cookie with `setcookie()`. `Response::SHARED_CACHE_HEADERS` lists, lower-cased, the headers a shared cache takes its policy from: `Cache-Control`, the targeted `CDN-Cache-Control`, `Cloudflare-CDN-Cache-Control`, `Surrogate-Control` and `Edge-Control`, nginx's `X-Accel-Expires`, and `Expires`. The error handler and the security extension use them to send `Cache-Control: no-store` on such responses in place of a policy a shared cache could act on - the extension leaves a `no-store` or unqualified `private` a response set on the `Response` itself, with no targeted header beside it; another response that sets one of these headers itself keeps its own policy. See [Extension: security](22-Extensions-Security.md#caching).
+
+Credentials are read from `HTTP_AUTHORIZATION`, Apache's `REDIRECT_HTTP_AUTHORIZATION` copy of it after a front-controller rewrite, what PHP parsed out of it (`PHP_AUTH_USER`, `PHP_AUTH_PW`, `PHP_AUTH_DIGEST`), and a server-authenticated `REMOTE_USER` or `REDIRECT_REMOTE_USER`. Each counts only when it is not empty: a server may pass any of them on empty for a request that carried none, as nginx's `fastcgi_param` does without `if_not_empty` and an unguarded Apache `[E=HTTP_AUTHORIZATION:...]` rule does, and every page would then be uncacheable. A Basic login with an empty user name still counts through its password.
+
 ## Response Methods
 
 Chainable mutator methods - all return `$this`:
@@ -161,8 +171,13 @@ Chainable mutator methods - all return `$this`:
 // replace body after construction
 ->body(string $body): self
 
-// add or replace a header (name is normalized to Title-Case)
+// add or replace a header (name is normalized to Title-Case); a Set-Cookie is sent beside the
+// other cookies rather than replacing them, but it holds one cookie - a second call replaces the
+// first - so use ->cookie(), which sets any number
 ->header(string $name, string $value): self
+
+// remove a header, whatever case names it; an absent one is no error
+->removeHeader(string $name): self
 
 // set a cookie
 ->cookie(string $name, string $value, array $options = []): self
@@ -176,6 +191,9 @@ Read accessor - does not chain:
 ```
 // read a header back (useful in tests or extensions)
 ->getHeader(string $name):  - string
+
+// the cookies the response will set, each as ['name' => ..., 'value' => ..., 'options' => [...]]
+->cookies: list<array>
 ```
 
 ```

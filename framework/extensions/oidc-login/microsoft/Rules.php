@@ -42,7 +42,7 @@ final class Rules
     /** @return list<string> */
     public static function scopes(mixed $value): array
     {
-        $raw = is_array($value) ? array_values($value) : [];
+        $raw = is_array($value) ? array_values($value) : ['openid', 'profile', 'email'];
 
         $scopes = [];
         /** @var mixed $scope */

@@ -20,7 +20,7 @@ final readonly class Assets
         $file = $this->publicDir . $relative;
 
         return Cache::remember(
-            'asset.version.' . Identifier::fastHash($relative),
+            'asset.version.' . Identifier::fastHash($file),
             static fn(): string => is_file($file) ? (string) filemtime($file) : '1',
             self::CACHE_TTL,
         );

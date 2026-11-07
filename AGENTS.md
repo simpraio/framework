@@ -51,6 +51,15 @@ via `.gitattributes` while the framework repository relies on `core.autocrlf`, s
 differs byte-for-byte in the working tree. `git show HEAD:<path>` on both sides is the honest
 comparison, and `tools/verify-vendored.php` in the framework repository automates it.
 
+## Framework Upgrades
+
+Upgrading a project is the user's decision, never a side effect of other work. Working inside a
+project, compare its `VERSION` with the newest Simpra release, the framework repository's newest `v*`
+tag. If a newer release exists, tell the user and ask whether to upgrade before doing anything else
+toward it; do not re-vendor unasked. Working on the framework itself, change only the framework
+repositories: a fix is not carried into the projects built on it until the version is released and
+the user has said yes to upgrading them.
+
 ## Project Goal
 
 Simpra is a minimal PHP 8.4+ framework for small websites, internal tools, and simple SaaS projects.
@@ -377,10 +386,12 @@ Classify before editing, and state the tier in the commit message.
 | **L0** | Docs, comments, `CHANGELOG.md`, `UPGRADING.md`. No behaviour change. |
 | **L1** | Implementation under `core/` or an extension, with no change to any public static method's name, signature, return shape or thrown type. |
 | **L2** | Observable behaviour: routing, request parsing, template output, an extension's hook contributions, config keys, enabled/disabled semantics. |
-| **L3** | The public facades in `core/*.php`, session, auth, CSRF, egress, the error handler, config precedence, DB schema or connections, anything in `tools/verify-vendored.php`'s sync map, and any change needing an `UPGRADING.md` entry. |
+| **L3** | The public facades in `core/*.php`, session, auth, CSRF, egress, the error handler, config precedence, DB schema or connections, a change to which paths `tools/verify-vendored.php` keeps in sync, and any change needing an `UPGRADING.md` entry. |
 
 A change needing a line in `UPGRADING.md` is L3 by definition: each one is manual work for
-every downstream project.
+every downstream project. Being vendored does not raise a file's tier - most of `core/` is synced
+and still L1 - but adding, removing or renaming a synced path does, because every project must
+re-vendor to match. A change to tests alone is L0.
 
 ### R1 — Failing test first
 
@@ -529,8 +540,9 @@ Rules that follow, each of which has already been violated once:
   needs *your own* database belongs in `tests/core/` or `tests/extensions/` with a skip guard — that is
   where the six DB-backed suites live, which is also why this repository needs no separate database tier
   at all. `tests/live/` is only for suites depending on infrastructure nobody here controls: today
-  `http-client.php` (httpbin.org) and `mail.php`/`mail_attachment.php` (a real SMTP relay). Keeping those
-  out of the default run means a routine test run never pings a third party. Applying that test moved
+  `http-client.php` (httpbin.org), `mail.php`/`mail_attachment.php` (a real SMTP relay) and
+  `oidc-login.php` (Microsoft and Google endpoints). Keeping those out of the default run means a
+  routine test run never pings a third party. Applying that test moved
   `live/translation.php` into `extensions/translation_store.php`, where it belongs: it only ever needed
   the local database, and hiding in `live/` meant nobody noticed it had been failing on a disabled
   extension.

@@ -1,8 +1,10 @@
 [source]
-paths = ["framework"]
+paths = ["framework", "tools"]
+# The benchmarks run on the test helpers, which a production checkout does not ship.
 excludes = [
     "framework/cache",
     "framework/logs",
+    "tools/bench",
 ]
 
 [linter.rules.excessive-parameter-list]

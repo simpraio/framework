@@ -22,7 +22,8 @@ final class Extensions
 
     public static function load(string $extensionsDir, string $bundlePath): self
     {
-        if (is_file($bundlePath)) {
+        // A bundle another account built is owner-only and unreadable here: rebuild it like a missing one.
+        if (is_readable($bundlePath)) {
             /** @var list<array{class: class-string<Boot>, file: string, config: ?string}> $map */
             $map = require $bundlePath;
             return new self($map);

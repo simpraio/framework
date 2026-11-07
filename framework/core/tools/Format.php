@@ -83,10 +83,16 @@ final class Format
     {
         $string = (string)$value;
 
-        return htmlspecialchars(
-            string: $trim ? trim($string) : $string,
-            flags: ENT_QUOTES | ENT_SUBSTITUTE,
-            encoding: 'UTF-8',
+        // Braces too: escaped text reaches a page through rawTokens() as well, and a page is searched
+        // for {TOKEN} and block markers again after it is filled.
+        return str_replace(
+            search: ['{', '}'],
+            replace: ['&#123;', '&#125;'],
+            subject: htmlspecialchars(
+                string: $trim ? trim($string) : $string,
+                flags: ENT_QUOTES | ENT_SUBSTITUTE,
+                encoding: 'UTF-8',
+            ),
         );
     }
 }

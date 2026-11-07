@@ -32,17 +32,20 @@ final class RequestOptions
     /** Whether anything goes out as a body, however the verb is spelled. */
     public function hasBody(): bool
     {
-        return Body::hasData($this->data) || $this->raw;
+        return Body::hasData($this->data);
     }
 
     public function forRedirect(int $status, bool $sameOrigin = true): self
     {
-        $dropBody = $status === 303 || ($this->method === 'POST' && ($status === 301 || $status === 302));
+        // A body bound for another origin is dropped whatever the status: it was written for the first one.
+        $dropBody = $status === 303
+            || ($this->method === 'POST' && ($status === 301 || $status === 302))
+            || (!$sameOrigin && Body::hasData($this->data));
 
         return new self([
             'method' => $dropBody ? 'GET' : $this->method,
             'data' => $dropBody ? null : $this->data,
-            'headers' => $sameOrigin ? $this->headers : Headers::withoutSensitive($this->headers),
+            'headers' => $sameOrigin ? $this->headers : Headers::forOtherOrigin($this->headers),
             'cookies' => $sameOrigin ? $this->cookies : null,
             'raw' => $dropBody ? false : $this->raw,
             'timeout' => $this->timeout,

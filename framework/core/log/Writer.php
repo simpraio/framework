@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace core\log;
 
+use Closure;
 use core\cache\Cache;
 use core\tools\Directory;
 use core\tools\Format;
+use core\tools\Silently;
+use Throwable;
 
 final class Writer
 {
@@ -22,13 +25,23 @@ final class Writer
         self::ERROR => 3,
     ];
 
-    /** @param list<string> $redactKeys lowercased context keys to scrub */
+    private ?Secrets $knownSecrets = null;
+    private ?Context $context = null;
+    private bool $secretCollectionFailed = false;
+
+    /**
+     * @param list<string> $redactKeys context keys to scrub besides SensitiveKeys' built-in ones
+     * @param (Closure(): list<string>)|null $secrets the values to strip from the message and every
+     *     context string. Called once, when the first line is written: collecting them walks the whole
+     *     configuration, a cost most requests, writing no line, would pay for nothing.
+     */
     public function __construct(
         private readonly string $directory,
         public string $level = self::WARNING,
         public readonly bool $rotateDaily = true,
         public readonly int $retentionDays = 14,
         public readonly array $redactKeys = [],
+        private readonly ?Closure $secrets = null,
     ) {
         Directory::ensure($this->directory, 0o750, 'Logger: cannot create directory');
     }
@@ -42,52 +55,93 @@ final class Writer
             return;
         }
 
-        $suffix = '';
-        if ($context !== []) {
-            $context = $this->redactKeys === [] ? $context : self::scrub($context, $this->redactKeys);
-            $encoded = json_encode(
-                $context,
-                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
-                    | JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE,
-            );
-            $suffix = ' ' . ($encoded !== false ? $encoded : '{}');
+        if ($this->knownSecrets === null) {
+            try {
+                $this->knownSecrets = new Secrets($this->secrets !== null ? ($this->secrets)() : []);
+            } catch (Throwable) {
+                // An incomplete scan cannot safely redact caller text, including an exception's message.
+                $this->secretCollectionFailed = true;
+                $this->knownSecrets = new Secrets([]);
+            }
         }
+        if ($this->secretCollectionFailed) {
+            $message = Secrets::UNCOLLECTED;
+            $context = [];
+        }
+        $this->context ??= new Context($this->redactKeys, $this->knownSecrets);
 
-        $line = sprintf(
-            "[%s] [%s] %s%s\n",
+        $suffix = $context !== [] ? ' ' . $this->context->encode($context) : '';
+
+        $line = Text::escape(sprintf(
+            '[%s] [%s] %s%s',
             Format::datetime(),
             strtoupper($level),
-            str_replace(search: ["\r\n", "\r", "\n"], replace: ' ', subject: $message),
+            Text::cap($this->knownSecrets->strip($message)),
             $suffix,
-        );
+        )) . "\n";
 
         $filename = $this->rotateDaily
             ? $this->directory . '/' . Format::datetime(format: 'Y-m-d') . '.log'
             : $this->directory . '/app.log';
 
-        file_put_contents($filename, $line, FILE_APPEND | LOCK_EX);
+        if (!is_file($filename)) {
+            self::create($filename);
+        }
+        // Logging must never fail the caller: under the error handler a refused write would be an
+        // exception thrown from Log::info(). The line goes to PHP's own error log instead.
+        if (Silently::call(static fn(): int|false => file_put_contents($filename, $line, FILE_APPEND | LOCK_EX)) === false) {
+            error_log('Logger: cannot write ' . $filename . ': ' . rtrim($line, characters: "\n"));
+        }
     }
 
     /**
-     * Recursively replace values whose keys match $needles (lowercased) with
-     * [REDACTED]. Only string keys participate - list items keep their values.
-     *
-     * @param array<int|string, mixed> $value
-     * @param list<string> $needles already-lowercased
-     * @return array<int|string, mixed>
+     * Log lines can carry personal data, and a file's permissions are checked only when it is opened: a
+     * new log is made under a name nobody else knows, owner-only, given its mode, and only then linked
+     * into place. If another request linked it first, that one stands. Where that cannot be done - no
+     * hard links, or no temporary file beside it - the file is created under its name and narrowed
+     * straight after.
      */
-    private static function scrub(array $value, array $needles): array
+    private static function create(string $filename): void
     {
-        foreach (array_keys($value) as $key) {
-            if (is_string($key) && in_array(strtolower($key), $needles, strict: true)) {
-                $value[$key] = '[REDACTED]';
-                continue;
+        $directory = dirname($filename);
+        $temporary = Silently::call(static fn(): string|false => tempnam($directory, prefix: '.log-'));
+        // tempnam() falls back to the system temporary directory, from which no link reaches here.
+        if ($temporary === false || realpath(dirname($temporary)) !== realpath($directory)) {
+            if ($temporary !== false) {
+                Silently::call(static fn(): bool => unlink($temporary));
             }
-            if (is_array($value[$key])) {
-                $value[$key] = self::scrub($value[$key], $needles);
-            }
+            Silently::call(static fn(): bool => touch($filename));
+            self::narrow($filename, $filename);
+            return;
         }
-        return $value;
+
+        self::narrow($temporary, $temporary . '.mode');
+        $linked = Silently::call(static fn(): bool => link($temporary, $filename));
+        Silently::call(static fn(): bool => unlink($temporary));
+        if (!$linked && !is_file($filename)) {
+            Silently::call(static fn(): bool => touch($filename));
+            self::narrow($filename, $filename);
+        }
+    }
+
+    /**
+     * Closes $file to other accounts. The group keeps what the umask gives a new file, so a web server
+     * and CLI jobs sharing a group can append; that mode is read back from $created, a file just made -
+     * asking umask() for the mask sets it for a moment, and another thread of a threaded server would
+     * create its files under that mask. A separate probe is created and removed when $created is not $file.
+     */
+    private static function narrow(string $file, string $created): void
+    {
+        if ($created !== $file) {
+            Silently::call(static fn(): bool => touch($created));
+        }
+        clearstatcache(true, $created);
+        $mode = Silently::call(static fn(): int|false => fileperms($created));
+        if ($created !== $file) {
+            Silently::call(static fn(): bool => unlink($created));
+        }
+
+        Silently::call(static fn(): bool => chmod($file, permissions: ($mode === false ? 0o600 : $mode) & 0o660));
     }
 
     /** Delete log files older than retentionDays. Runs at most once per day. */

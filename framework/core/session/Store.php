@@ -25,6 +25,11 @@ final class Store
 
         ini_set(option: 'session.use_strict_mode', value: '1');
         ini_set(option: 'session.use_only_cookies', value: '1');
+        // A cookie kept longer than the data behind it signs its visitor out at random: garbage
+        // collection deletes session data idle for gc_maxlifetime, 24 minutes by default.
+        if ($this->config->lifetime > (int)ini_get('session.gc_maxlifetime')) {
+            ini_set(option: 'session.gc_maxlifetime', value: (string)$this->config->lifetime);
+        }
 
         // Must be set before the session starts: PHP stamps these headers at start time.
         session_cache_limiter($this->config->cacheLimiter);
@@ -92,8 +97,12 @@ final class Store
 
     public function destroy(): void
     {
-        if (!$this->started && session_status() !== PHP_SESSION_ACTIVE) {
-            return;
+        if (!$this->isStarted()) {
+            // A session nothing has read yet is still the visitor's: a logout has to end it too.
+            if (!$this->hasCookie()) {
+                return;
+            }
+            $this->ensureStarted();
         }
         $_SESSION = [];
         if (ini_get('session.use_cookies')) {

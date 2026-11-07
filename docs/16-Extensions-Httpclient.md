@@ -9,10 +9,10 @@ return [
     'extensions' => [
         'http-client' => [
             'enabled'           => true,
-            'retries'           => 5,             // max retries on transient failure (safe methods only)
+            'retries'           => 5,             // max retries on transient failure (safe methods only), within timeout
             'retry_delay'       => 1,             // seconds to sleep between retries
-            'timeout'           => 60,            // total request timeout in seconds
-            'connect_timeout'   => 10,            // connection timeout in seconds
+            'timeout'           => 60,            // seconds for the whole call: attempts, retry delays and redirects together
+            'connect_timeout'   => 10,            // seconds to connect, per attempt, within timeout
             'verify_tls'        => true,          // enforce TLS certificate verification
             'tls_insecure_acknowledged' => '',     // with verify_tls=false, must be Config::TLS_INSECURE_ACK ('I_ACCEPT_INSECURE_TLS')
             'max_response_bytes' => 10_485_760,  // 10 MB response cap
@@ -48,7 +48,7 @@ does have a globally routable address.
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `HttpClient::get($url, $options)` | `Response` | Sends a GET request. Throws `HttpClientException` on a non-retriable cURL error or after all retries are exhausted. |
+| `HttpClient::get($url, $options)` | `Response` | Sends a GET request. Throws `HttpClientException` on a non-retriable cURL error, after all retries are exhausted, or once `timeout` is spent. |
 | `HttpClient::post($url, $options)` | `Response` | Sends a POST request. Never retried automatically. |
 | `HttpClient::request($url, $options)` | `Response` | Generic request. Pass `'method'` in `$options` to set the HTTP method. Supported option keys: `method`, `headers`, `data`, `raw`, `cookies`, `timeout`, `connect_timeout`, and `follow_redirects` (default `true`; set `false` to return the original redirect response). |
 
@@ -65,6 +65,11 @@ the list is `core\http\Request::METHODS`. Leaving it out, or passing `null` or a
 string, means `POST` when `data` is set and `GET` when it is not. Any other value throws
 `HttpClientException('HTTP client method rejected')` before anything is sent.
 
+A `POST`, `PUT` or `PATCH` without `data` is sent with `Content-Length: 0`, never chunked, so a
+server or gateway that refuses chunked requests accepts it. `GET`, `HEAD`, `DELETE` and `OPTIONS`
+without `data` declare no body. `raw` only changes how `data` is sent, so it makes no difference to
+a request without `data`: a raw `GET` without it carries no body and is retried like any `GET`.
+
 The returned `Response` object exposes:
 
 ```
@@ -73,6 +78,55 @@ $res->body      // string - raw response body
 $res->json      // mixed - decoded JSON, or null if response is not JSON
 $res->headers   // array<string, string|list<string>> - lowercased response headers
 ```
+
+All four are read-only. `$json` is decoded from `$body` when it is first read, and the result is
+kept for later reads. A body is decoded only when its `Content-Type` contains `json`; invalid
+JSON reads as `null`. Decoded, a body can take several times its size in memory, so a response
+whose `$json` is never read costs only its body.
+
+### Timeouts
+
+`timeout` bounds the whole call to `get()`, `post()` or `request()`: every attempt, every
+`retry_delay` pause and every redirect hop share it, measured on a monotonic clock. Each attempt
+is given what is left of it, so neither a retry nor a redirect starts a fresh budget. A retry is
+made only while more than `retry_delay` seconds remain. When the time is spent the call throws
+`HttpClientException` with `$curlError` `28` (`CURLE_OPERATION_TIMEDOUT`): with cURL's message
+when an attempt runs out, or `HTTP client timeout exceeded` when no time is left to start one.
+`connect_timeout` limits connecting within each attempt and never extends the call. Resolving a
+host name for the egress check is not interrupted by the timeout.
+
+The per-request `timeout` and `connect_timeout` options replace the configured values for that
+call, with the same meaning.
+
+### Redirects
+
+With `follow_redirects` on, a `301`, `302`, `303`, `307` or `308` response is followed for up
+to 5 hops; a redirect after the fifth is returned as the response. A `303`, and a `301` or `302` answering a
+`POST`, is followed as a `GET` without the body. Each target is checked as the first URL was,
+and egress is checked again for every hop.
+
+A redirect from `https` to `http` is refused with
+`HttpClientException('HTTP client redirect downgrade rejected')` before anything is sent to the
+target, whether or not the egress guard is on. Follow such a redirect yourself, with
+`follow_redirects` set to `false`, if it is really wanted.
+
+A hop to another origin - a different scheme, host or port, with `80` and `443` standing for a
+port the URL leaves out - keeps only these caller headers, matched case-insensitively: `Accept`,
+`Accept-Encoding`, `Accept-Language`, `User-Agent`, `Cache-Control` and `Pragma`. Every other
+header stays behind - `Authorization`, `Cookie`, an API key in `X-Api-Key` and any other custom
+header - and so does the `cookies` jar. A request with `data` loses it too and goes to the new
+origin as a `GET`, whatever the status, a `307` or `308` included: the body was written for the
+first origin. When a header or a body really must follow a redirect to another host, set
+`follow_redirects` to `false` and decide about the `Location` yourself. A hop within the same
+origin keeps every header, the cookie jar and the body, and a `307` or `308` keeps the method.
+
+### Errors
+
+`HttpClientException::$url` holds a label of the URL the failure concerns - scheme, host and a
+port the URL named, never its path, query, fragment or credentials - or `[unparseable-url]` for
+a URL that cannot be parsed. That holds for every failure, one at a redirect target the server
+chose included. `HttpClientException::$curlError` is the cURL error code, or `0` when the
+request was refused before or without a transport error.
 
 ## Example
 

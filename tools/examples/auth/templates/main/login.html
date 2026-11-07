@@ -1,7 +1,7 @@
 <section class="login-page" aria-labelledby="login-title">
     <form class="login-form" method="post" action="/login" aria-labelledby="login-title">
         <h1 id="login-title">Login</h1>
-        {LOGIN_ERROR}<p class="form-error" role="alert">Invalid username or password.</p>{-LOGIN_ERROR}
+        {HasLoginError}<p class="form-error" role="alert">Invalid username or password.</p>{-HasLoginError}
         <input type="hidden" name="return" value="{RETURN_TO}">
         <label>
             Username

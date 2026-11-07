@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace core;
 
+use core\config\Config;
+use core\error\Deprecations;
 use core\error\Page;
 use core\error\SecurityHeaders;
 use core\http\HttpException;
 use core\http\Url;
+use core\log\Secrets;
 use core\log\Writer;
 use ErrorException;
+use RuntimeException;
 use Throwable;
 
 final class ErrorHandler
@@ -56,7 +60,7 @@ final class ErrorHandler
         }
 
         if (($severity & self::TOLERATED) !== 0) {
-            self::$log?->log(Writer::WARNING, 'Deprecated: ' . $message, ['file' => $file, 'line' => $line]);
+            Deprecations::record(self::$log, $message, $file, $line);
             return true;
         }
 
@@ -66,7 +70,7 @@ final class ErrorHandler
     private static function onException(Throwable $e): void
     {
         if (self::$rendering) {
-            error_log('ErrorHandler re-entry: ' . self::describe($e));
+            self::report('ErrorHandler re-entry: ' . self::describe($e));
             return;
         }
 
@@ -107,7 +111,7 @@ final class ErrorHandler
         if (!headers_sent()) {
             http_response_code($status);
             header('Content-Type: text/html; charset=UTF-8');
-            SecurityHeaders::emit(self::$debug);
+            SecurityHeaders::emit(self::$debug, $status);
         }
 
         echo self::page()->html($e, $status);
@@ -141,7 +145,7 @@ final class ErrorHandler
                 'ip' => substr(string: self::serverValue('REMOTE_ADDR'), offset: 0, length: 45),
             ]);
         } catch (Throwable $writeFailure) {
-            error_log('ErrorHandler: denial log write failed: ' . $writeFailure->getMessage());
+            self::report('ErrorHandler: denial log write failed: ' . $writeFailure->getMessage());
         }
     }
 
@@ -180,17 +184,35 @@ final class ErrorHandler
                 'trace' => $e->getTraceAsString(),
             ]);
         } catch (Throwable $writeFailure) {
-            error_log('ErrorHandler: log write failed: ' . $writeFailure->getMessage());
-            error_log(self::describe($e));
+            self::report('ErrorHandler: log write failed: ' . $writeFailure->getMessage());
+            self::report(self::describe($e));
         }
 
         foreach (self::$sinks as $sink) {
             try {
                 $sink($e);
             } catch (Throwable $sinkFailure) {
-                error_log('ErrorHandler: sink failed: ' . $sinkFailure->getMessage());
+                self::report('ErrorHandler: sink failed: ' . $sinkFailure->getMessage());
             }
         }
+    }
+
+    /**
+     * To PHP's own error log, stripped of configured secret values like a line of the log file. With
+     * no configuration loaded there is nothing to strip, and the line is reported as it is. A secret scan
+     * that stopped at its limits cannot strip what it missed, so the line is left out, as the log file
+     * leaves out caller text.
+     */
+    private static function report(string $line): void
+    {
+        try {
+            $stripped = (new Secrets(Config::secrets()))->strip($line);
+        } catch (RuntimeException) {
+            $stripped = 'ErrorHandler: ' . Secrets::UNCOLLECTED;
+        } catch (Throwable) {
+            $stripped = $line;
+        }
+        error_log($stripped);
     }
 
     private static function page(): Page

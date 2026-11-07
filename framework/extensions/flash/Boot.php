@@ -19,7 +19,7 @@ final class Boot extends ExtensionBoot implements Contributor
 
         return [
             'blocks' => [
-                'hasErrors' => Flash::hasErrors(),
+                'HasErrors' => Flash::hasErrors(),
             ],
         ];
     }

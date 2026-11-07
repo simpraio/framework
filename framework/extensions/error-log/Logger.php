@@ -6,7 +6,10 @@ namespace extensions\error_log;
 
 use core\config\Config as CoreConfig;
 use core\db\Db;
+use core\log\Secrets;
+use core\log\SensitiveKeys;
 use core\Request;
+use RuntimeException;
 use Throwable;
 
 final class Logger
@@ -20,14 +23,15 @@ final class Logger
         $config ??= Config::enabled();
 
         try {
+            $secrets = self::secrets();
             // Inserts and retention use the database's UTC clock.
             Db::insert('error_log', [
                 'exception' => self::ascii($e::class, 191),
-                'message' => self::truncate($e->getMessage(), 65_535),
+                'message' => self::truncate($secrets?->strip($e->getMessage()) ?? Secrets::UNCOLLECTED, 65_535),
                 'file' => self::truncate($e->getFile(), 512),
                 'line' => $e->getLine(),
                 'trace' => $config->storeTrace
-                    ? self::truncate($e->getTraceAsString(), 16_777_215)
+                    ? self::truncate($secrets?->strip($e->getTraceAsString()) ?? Secrets::UNCOLLECTED, 16_777_215)
                     : '',
                 'url' => self::truncate(self::scrubUrl(Request::uri(), self::redactKeys($config)), 2048),
             ]);
@@ -36,9 +40,14 @@ final class Logger
         }
     }
 
+    /** A retention of 0 or less keeps every row. */
     public static function purge(int $retentionDays): void
     {
         Config::enabled();
+
+        if ($retentionDays < 1) {
+            return;
+        }
 
         try {
             Db::execute(
@@ -47,6 +56,22 @@ final class Logger
             );
         } catch (Throwable $sinkFailure) {
             error_log('errors sink failed: ' . $sinkFailure->getMessage());
+        }
+    }
+
+    /**
+     * The configured secret values the log file strips, so a row does not store what the file leaves
+     * out. With no configuration loaded there are none, and the error is stored as it is. Null when the
+     * scan stopped at its limits: what it missed cannot be stripped, so the text is not stored.
+     */
+    private static function secrets(): ?Secrets
+    {
+        try {
+            return new Secrets(CoreConfig::secrets());
+        } catch (RuntimeException) {
+            return null;
+        } catch (Throwable) {
+            return new Secrets([]);
         }
     }
 
@@ -68,15 +93,17 @@ final class Logger
     }
 
     /**
-     * Scrub query values only; leave the rest of the URL untouched.
+     * Scrub query values only; leave the rest of the URL untouched. SensitiveKeys decides which
+     * names are secret, so its built-in names are redacted besides $needles.
      *
-     * @param list<string> $needles already-lowercased
+     * @param list<string> $needles
      */
     private static function scrubUrl(string $url, array $needles): string
     {
-        if ($needles === [] || ($qPos = strpos(haystack: $url, needle: '?')) === false) {
+        if (($qPos = strpos(haystack: $url, needle: '?')) === false) {
             return $url;
         }
+        $sensitiveKeys = SensitiveKeys::index($needles);
 
         $base = substr(string: $url, offset: 0, length: $qPos);
         $rest = substr($url, $qPos + 1);
@@ -100,7 +127,7 @@ final class Logger
             }
             $eq = strpos(haystack: $pair, needle: '=');
             $name = $eq === false ? $pair : substr(string: $pair, offset: 0, length: $eq);
-            if (self::isRedacted($name, $needles)) {
+            if (self::isRedacted($name, $sensitiveKeys)) {
                 $parts[$i] = $name . '=' . urlencode('[REDACTED]');
             }
         }
@@ -112,17 +139,17 @@ final class Logger
      * Matches the name as written and as PHP reads it into $_GET, which cuts it at a NUL or a
      * "[", drops leading spaces and turns "." and " " into "_": token%00x and token[a] are token.
      *
-     * @param list<string> $needles already-lowercased
+     * @param array<string, true> $sensitiveKeys from SensitiveKeys::index()
      */
-    private static function isRedacted(string $name, array $needles): bool
+    private static function isRedacted(string $name, array $sensitiveKeys): bool
     {
         $parsed = [];
         parse_str($name . '=', $parsed);
         // A numeric name comes back as an int key.
         $asRead = strval(array_key_first($parsed) ?? '');
 
-        return in_array(strtolower(urldecode($name)), $needles, strict: true)
-            || in_array(strtolower($asRead), $needles, strict: true);
+        return SensitiveKeys::matches(urldecode($name), $sensitiveKeys)
+            || SensitiveKeys::matches($asRead, $sensitiveKeys);
     }
 
     /**

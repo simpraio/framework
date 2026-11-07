@@ -8,8 +8,11 @@ use InvalidArgumentException;
 
 final class HeaderRules
 {
-    /** RFC 5322 ftext: the characters a field name may be built from. */
-    private const string FIELD_NAME = '/^[!#$%&\'*+\-.^_`|~0-9A-Za-z]+$/D';
+    /**
+     * RFC 5322 ftext: the characters a field name may be built from. A leading dot is refused:
+     * any SMTP hop that skips dot-stuffing turns `.From` into `From`.
+     */
+    private const string FIELD_NAME = '/^[!#$%&\'*+\-^_`|~0-9A-Za-z][!#$%&\'*+\-.^_`|~0-9A-Za-z]*$/D';
 
     /**
      * ASCII only: SMTPUTF8 is not negotiated. Unicode must use RFC 2047/2231 encoding.

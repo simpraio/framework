@@ -46,14 +46,21 @@ final readonly class Config implements JsonSerializable
         return new self(
             host: $host,
             port: max(1, Cast::int($smtp['port'] ?? null, 'extensions.mail.smtp.port', 587)),
-            encryption: SmtpEncryption::tryFrom(
-                strtolower(Cast::trimmedString($smtp['encryption'] ?? null, 'extensions.mail.smtp.encryption', 'tls'))
-            ) ?? SmtpEncryption::Tls,
+            encryption: self::encryption($smtp['encryption'] ?? null),
             auth: Cast::bool($smtp['auth'] ?? null, 'extensions.mail.smtp.auth', true),
             username: Cast::trimmedString($smtp['username'] ?? null, 'extensions.mail.smtp.username'),
             password: Cast::string($smtp['password'] ?? null, 'extensions.mail.smtp.password'),
             timeout: max(1, Cast::int($smtp['timeout'] ?? null, 'extensions.mail.smtp.timeout', 30)),
         );
+    }
+
+    /** A misspelt value is refused: falling back to a mode would discard what the operator meant. */
+    private static function encryption(mixed $value): SmtpEncryption
+    {
+        $field = 'extensions.mail.smtp.encryption';
+        $allowed = array_map(static fn(SmtpEncryption $case): string => $case->value, SmtpEncryption::cases());
+
+        return SmtpEncryption::from(Cast::oneOf(Cast::trimmedString($value, $field, 'tls'), $field, $allowed, 'tls'));
     }
 
     public function address(): string

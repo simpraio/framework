@@ -69,8 +69,8 @@ Session cookie settings live in `config/session.php`:
 ```php
 return [
     'session' => [
-        'name'      => 'sid',
-        'lifetime'  => 0,          // 0 = until browser close
+        'name'      => 'SID',
+        'lifetime'  => 0,          // 0 = until browser close; a longer one also raises session.gc_maxlifetime to match
         'path'      => '/',
         'domain'    => '',
         'secure'    => true,
@@ -86,5 +86,11 @@ return [
 session-backed response from being stored by clients or shared caches. An empty value disables PHP's
 automatic headers; use it only when the application sets a safe `Cache-Control` header on every
 session-backed response. `public` is deliberately rejected.
+
+A `lifetime` longer than `session.gc_maxlifetime` raises it for this application's own garbage
+collection; a longer value the server sets is kept. Data in a shared save path can still be removed
+sooner by whoever else collects there - another application with a shorter lifetime, or a cron job
+such as Debian's `sessionclean`, which reads `php.ini` - so a lifetime longer than the server's needs a
+`save_path` of its own.
 
 See [Configuration](02-Configuration.md) and [Security](26-Security.md) for deployment guidance.

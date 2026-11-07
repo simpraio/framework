@@ -29,7 +29,7 @@ final readonly class Session
             lifetime: Cast::int($raw['lifetime'] ?? null, 'session.lifetime'),
             path: Cast::string($raw['path'] ?? null, 'session.path', '/'),
             domain: Cast::string($raw['domain'] ?? null, 'session.domain'),
-            secure: Cast::bool($raw['secure'] ?? null, 'session.secure'),
+            secure: Cast::bool($raw['secure'] ?? null, 'session.secure', true),
             httpOnly: Cast::bool($raw['http_only'] ?? null, 'session.http_only', true),
             sameSite: Cast::oneOf($raw['same_site'] ?? null, 'session.same_site', ['Lax', 'Strict', 'None'], 'Lax'),
             savePath: Cast::string($raw['save_path'] ?? null, 'session.save_path'),

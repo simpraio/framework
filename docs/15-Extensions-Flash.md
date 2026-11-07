@@ -14,7 +14,7 @@ return [
 ];
 ```
 
-Flash data lives in the session and is consumed on the next request. The Boot class implements `Contributor`, exposing the `hasErrors` block to all templates.
+Flash data lives in the session and is consumed on the next request. The Boot class implements `Contributor`, exposing the `HasErrors` block to all templates.
 
 ## Public API
 
@@ -23,14 +23,14 @@ Flash data lives in the session and is consumed on the next request. The Boot cl
 | `Flash::withErrors($errors, $keep)` | `void` | Stores a field-name -> message error map in the session. `$keep` is an optional list of request field names to persist as old input - only listed fields are stored, never passwords or tokens. |
 | `Flash::errors()` | `array` | Returns the error map from the previous request. Empty if no errors were flashed. |
 | `Flash::submitted()` | `array` | Returns the old input map from the previous request, keyed by field name. |
-| `Flash::hasErrors()` | `bool` | Returns `true` if any errors were flashed. Also exposed as the `hasErrors` template block by the contributor. |
+| `Flash::hasErrors()` | `bool` | Returns `true` if any errors were flashed. Also exposed as the `HasErrors` template block by the contributor. |
 
 The contributor injects one block into every template:
 
 ```
-{hasErrors}
+{HasErrors}
     <div class="alert">Please correct the errors below.</div>
-{-hasErrors}
+{-HasErrors}
 ```
 
 ## Example

@@ -46,7 +46,7 @@ Emit the token in an HTML form. The Boot hook validates it automatically on subm
 </form>
 ```
 
-The `{_csrf}` placeholder is replaced by the csrf `after()` hook in HTML responses. For AJAX, expose the token yourself, for example in a meta tag, and send it as a header:
+The `{_csrf}` placeholder is replaced by the csrf `after()` hook in HTML responses, anywhere in the page - so, like the CSP nonce, it must never reach a page in markup the application did not write: `tokens()` and `Format::escape()` encode its braces, `rawTokens()` does not. For AJAX, expose the token yourself, for example in a meta tag, and send it as a header:
 
 ```
 <meta name="csrf" content="{_csrf}">

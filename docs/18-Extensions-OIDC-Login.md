@@ -149,7 +149,7 @@ Provider-specific reads fail explicitly on the wrong provider:
 
 Templates retain `{MS_USER_NAME}`, `{MS_USER_EMAIL}`, `{IsMicrosoftAuthenticated}`, `{IsMicrosoftGuest}` and the corresponding `{GOOGLE_USER_NAME}`, `{GOOGLE_USER_EMAIL}`, `{IsGoogleAuthenticated}`, `{IsGoogleGuest}`.
 
-Every configured provider answers for both of its blocks on every request, enabled or not; a disabled one answers `false` to both, so neither its signed-in area nor its sign-in prompt is rendered. Profile tokens are contributed only for a provider somebody is actually signed in with. Do not drop a provider's blocks from a page expecting them to hide it - a block nobody answers for is left in the output, markers and contents alike.
+While the extension is enabled, every configured provider answers for both of its blocks on every request, enabled or not; a disabled one answers `false` to both, so neither its signed-in area nor its sign-in prompt is rendered. Profile tokens are contributed only for a provider somebody is actually signed in with. Do not drop a provider's blocks from a page expecting them to hide it - a block nobody answers for is left in the output, markers and contents alike. With the extension's own `enabled` false nothing answers them at all, so a page that keeps provider blocks while the extension is off shows them verbatim: remove the blocks along with the extension.
 
 Controllers must authorize protected actions before performing them. Template blocks are presentation, not access control. Neither provider signs in the local `extensions\auth\User` automatically. Use a CSRF-protected POST action for logout; logout is local and does not end the provider's own session.
 

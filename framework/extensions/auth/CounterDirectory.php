@@ -10,8 +10,8 @@ use RuntimeException;
 
 /**
  * File counters are checked even with APCu enabled. On POSIX, refuse links, group/other-writable
- * directories and foreign owners where ownership checks are available, so other accounts cannot
- * plant or reset counters. Windows requires deployment-managed ACLs instead.
+ * directories and foreign owners, so other accounts cannot plant or reset counters. Windows requires
+ * deployment-managed ACLs instead.
  */
 final class CounterDirectory
 {
@@ -40,7 +40,24 @@ final class CounterDirectory
             return false;
         }
 
-        return !function_exists('posix_geteuid')
-            || Silently::call(static fn(): int|false => fileowner($dir)) === posix_geteuid();
+        $euid = self::effectiveUid();
+
+        return $euid !== null && Silently::call(static fn(): int|false => fileowner($dir)) === $euid;
+    }
+
+    /** ext-posix is optional: without it, the owner of a file this process just created is its user. */
+    private static function effectiveUid(): ?int
+    {
+        if (function_exists('posix_geteuid')) {
+            return posix_geteuid();
+        }
+        $probe = Silently::call(static fn() => tmpfile());
+        if ($probe === false) {
+            return null;
+        }
+        $stat = fstat($probe);
+        fclose($probe);
+
+        return $stat === false ? null : $stat['uid'];
     }
 }

@@ -12,12 +12,16 @@ final class Composer
 {
     private const string EOL = "\r\n";
 
+    /** Cc and Bcc too: SMTP sends no RCPT for them, so a Bcc would only expose its address. */
     private const array RESERVED_HEADERS = [
         'from',
         'to',
+        'cc',
+        'bcc',
         'subject',
         'mime-version',
         'content-type',
+        'content-transfer-encoding',
         'date',
         'message-id',
     ];
@@ -31,8 +35,8 @@ final class Composer
         // Message-ID must derive from the validated sender to prevent header injection.
         $fromEmail = self::resolveFromEmail($message->fromEmail, $config->fromEmail);
 
-        [$body, $contentType] = $message->attachments === []
-            ? self::buildAlternative($message->html, $message->text)
+        [$contentHeaders, $body] = $message->attachments === []
+            ? self::buildContent($message->html, $message->text)
             : self::buildMixed($message);
 
         $headers = [
@@ -41,7 +45,7 @@ final class Composer
             'Date' => new DateTimeImmutable()->format(DATE_RFC2822),
             'Message-ID' => self::messageId($fromEmail),
             'MIME-Version' => '1.0',
-            'Content-Type' => $contentType,
+            ...$contentHeaders,
         ];
 
         return new Envelope(
@@ -53,12 +57,39 @@ final class Composer
         );
     }
 
-    /** @return array{0: string, 1: string} */
+    /**
+     * A client renders the last alternative it supports (RFC 2046 5.1.4), so an empty part is
+     * never offered: it would be chosen, and the message would display blank.
+     *
+     * @return array{0: array<string, string>, 1: string} the entity's content headers and its body
+     */
+    private static function buildContent(string $html, string $text): array
+    {
+        if ($html === '') {
+            return self::buildSinglePart('text/plain', $text);
+        }
+
+        return $text === ''
+            ? self::buildSinglePart('text/html', $html)
+            : self::buildAlternative($html, $text);
+    }
+
+    /** @return array{0: array<string, string>, 1: string} */
+    private static function buildSinglePart(string $type, string $content): array
+    {
+        return [
+            ['Content-Type' => $type . '; charset=utf-8', 'Content-Transfer-Encoding' => 'base64'],
+            self::encodeBody($content),
+        ];
+    }
+
+    /** @return array{0: array<string, string>, 1: string} */
     private static function buildAlternative(string $html, string $text): array
     {
         $boundary = 'alt-' . bin2hex(random_bytes(16));
 
         return [
+            ['Content-Type' => sprintf('multipart/alternative; boundary="%s"', $boundary)],
             implode(self::EOL, [
                 '--' . $boundary,
                 'Content-Type: text/plain; charset=utf-8',
@@ -72,31 +103,24 @@ final class Composer
                 self::encodeBody($html),
                 '--' . $boundary . '--',
             ]),
-            sprintf('multipart/alternative; boundary="%s"', $boundary),
         ];
     }
 
-    /** @return array{0: string, 1: string} */
+    /** @return array{0: array<string, string>, 1: string} */
     private static function buildMixed(Message $message): array
     {
         $mixedBoundary = 'mixed-' . bin2hex(random_bytes(16));
-        $altBoundary = 'alt-' . bin2hex(random_bytes(16));
+        [$contentHeaders, $content] = self::buildContent($message->html, $message->text);
 
         $body = implode(self::EOL, [
             '--' . $mixedBoundary,
-            sprintf('Content-Type: multipart/alternative; boundary="%s"', $altBoundary),
+            ...array_map(
+                static fn(string $name, string $value): string => $name . ': ' . $value,
+                array_keys($contentHeaders),
+                $contentHeaders,
+            ),
             '',
-            '--' . $altBoundary,
-            'Content-Type: text/plain; charset=utf-8',
-            'Content-Transfer-Encoding: base64',
-            '',
-            self::encodeBody($message->text),
-            '--' . $altBoundary,
-            'Content-Type: text/html; charset=utf-8',
-            'Content-Transfer-Encoding: base64',
-            '',
-            self::encodeBody($message->html),
-            '--' . $altBoundary . '--',
+            $content,
         ]);
 
         foreach ($message->attachments as $att) {
@@ -122,13 +146,13 @@ final class Composer
 
         $body .= self::EOL . '--' . $mixedBoundary . '--';
 
-        return [$body, sprintf('multipart/mixed; boundary="%s"', $mixedBoundary)];
+        return [['Content-Type' => sprintf('multipart/mixed; boundary="%s"', $mixedBoundary)], $body];
     }
 
     private static function resolveFromEmail(?string $messageEmail, string $configEmail): string
     {
         foreach ([$messageEmail !== null ? trim($messageEmail) : '', trim($configEmail)] as $candidate) {
-            if (filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false) {
+            if (Recipients::isAddress($candidate)) {
                 return $candidate;
             }
         }

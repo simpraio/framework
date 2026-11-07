@@ -23,7 +23,7 @@ final readonly class Config
     public static function fromArray(array $raw): self
     {
         return new self(
-            enabled:   Cast::bool($raw['enabled'] ?? null, 'extensions.mail.enabled', true),
+            enabled:   Cast::bool($raw['enabled'] ?? null, 'extensions.mail.enabled', false),
             transport: strtolower(Cast::trimmedString($raw['transport'] ?? null, 'extensions.mail.transport', 'smtp')),
             fromEmail: Cast::trimmedString($raw['from_email'] ?? null, 'extensions.mail.from_email'),
             fromName:  Cast::trimmedString($raw['from_name'] ?? null, 'extensions.mail.from_name'),

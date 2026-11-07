@@ -17,15 +17,15 @@ final class HttpClient
     /** @param array<string, mixed> $options */
     public static function request(string $url, array $options = []): Response
     {
-        // First, so a refused URL - credentials included - is never carried in an exception.
+        // First, so a refused URL - credentials included - is never sent anywhere.
         if (Url::parse($url) === null) {
-            throw new HttpClientException('HTTP client URL rejected', self::safeUrlLabel($url));
+            throw new HttpClientException('HTTP client URL rejected', $url);
         }
 
         try {
             $requestOptions = new RequestOptions($options);
         } catch (InvalidArgumentException $e) {
-            throw new HttpClientException($e->getMessage(), self::safeUrlLabel($url));
+            throw new HttpClientException($e->getMessage(), $url);
         }
 
         $config = CoreConfig::extensionConfig(Config::NAME, Config::class);
@@ -35,10 +35,10 @@ final class HttpClient
         }
 
         if (!$config->egress->allows($url)) {
-            throw new HttpClientException('HTTP client egress blocked', self::safeUrlLabel($url));
+            throw new HttpClientException('HTTP client egress blocked', $url);
         }
 
-        return self::attempt($config, $url, $requestOptions);
+        return self::attempt($config, $url, $requestOptions, Deadline::in(Options::callTimeout($config, $requestOptions)));
     }
 
     /** @param array<string, mixed> $options */
@@ -57,14 +57,65 @@ final class HttpClient
         Config $config,
         string $url,
         RequestOptions $options,
-        int $retry = 0,
+        Deadline $deadline,
         int $redirects = 0,
     ): Response
     {
+        $retry = 0;
+        while (true) {
+            [$ok, $error, $status, $message, $responseHeaders, $body] = self::dial($config, $url, $options, $deadline);
+
+            if ($ok && $error === 0) {
+                $target = $options->followRedirects && $redirects < Redirect::MAX
+                    ? self::redirectTarget($config, $url, $status, $responseHeaders)
+                    : null;
+                if ($target === null) {
+                    return new Response(status: $status, headers: $responseHeaders, body: $body);
+                }
+
+                return self::attempt($config, $target, $options->forRedirect($status, Redirect::sameOrigin($url, $target)), $deadline, $redirects + 1);
+            }
+
+            if ($error === CURLE_WRITE_ERROR) {
+                throw new HttpClientException(
+                    "Response exceeded {$config->maxResponseBytes} bytes",
+                    $url,
+                    $error,
+                );
+            }
+
+            $shouldRetry = Retry::permitted($error, $options)
+                && $retry < $config->retries
+                && $deadline->remainingMs() > $config->retryDelay * 1000;
+
+            if (!$shouldRetry) {
+                throw new HttpClientException($message, $url, $error);
+            }
+
+            if ($config->retryDelay > 0) {
+                sleep($config->retryDelay);
+            }
+            $retry++;
+        }
+    }
+
+    /**
+     * One request on the wire, given what is left of the call's timeout.
+     *
+     * @return array{0: bool, 1: int, 2: int, 3: string, 4: array<string, string|list<string>>, 5: string}
+     *     [ok, curlError, httpStatus, curlMessage, responseHeaders, body]
+     */
+    private static function dial(Config $config, string $url, RequestOptions $options, Deadline $deadline): array
+    {
+        $remaining = $deadline->remainingMs();
+        if ($remaining < 1) {
+            throw new HttpClientException('HTTP client timeout exceeded', $url, CURLE_OPERATION_TIMEDOUT);
+        }
+
         // Revalidate every dial, including retries and redirect hops.
         $pinned = $config->egress->resolvedFor($url);
         if ($pinned === null) {
-            throw new HttpClientException('HTTP client egress blocked', self::safeUrlLabel($url));
+            throw new HttpClientException('HTTP client egress blocked', $url);
         }
 
         $handle = curl_init();
@@ -77,55 +128,17 @@ final class HttpClient
             $curlOptions[CURLOPT_RESOLVE] = [Resolve::entry($url, $pinned)];
         }
 
+        // The attempt gets what is left of the call's timeout, not a timeout of its own.
+        unset($curlOptions[CURLOPT_TIMEOUT]);
+        $curlOptions[CURLOPT_TIMEOUT_MS] = $remaining;
+
         self::configure($handle, $curlOptions, $url);
 
         [$ok, $error, $status, $message] = self::execute($handle);
 
         unset($handle);
 
-        if ($ok !== false && $error === 0) {
-            if ($options->followRedirects && Redirect::isStatus($status) && $redirects < Redirect::MAX) {
-                $target = Redirect::target($url, $responseHeaders['location'] ?? null);
-                if ($target !== null) {
-                    // Checked even with egress off: a redirect can introduce what the caller never sent.
-                    if (Url::parse($target) === null) {
-                        throw new HttpClientException('HTTP client redirect URL rejected', self::safeUrlLabel($target));
-                    }
-                    if (!$config->egress->allows($target)) {
-                        throw new HttpClientException('HTTP client redirect egress blocked', self::safeUrlLabel($target));
-                    }
-
-                    return self::attempt($config, $target, $options->forRedirect($status, self::sameOrigin($url, $target)), 0, $redirects + 1);
-                }
-            }
-
-            return new Response(
-                status: $status,
-                headers: $responseHeaders,
-                body: $body,
-                json: Payload::json($responseHeaders, $body),
-            );
-        }
-
-        if ($error === CURLE_WRITE_ERROR) {
-            throw new HttpClientException(
-                "Response exceeded {$config->maxResponseBytes} bytes",
-                $url,
-                $error,
-            );
-        }
-
-        $shouldRetry = Retry::permitted($error, $options) && $retry < $config->retries;
-
-        if (!$shouldRetry) {
-            throw new HttpClientException($message, $url, $error);
-        }
-
-        if ($config->retryDelay > 0) {
-            sleep($config->retryDelay);
-        }
-
-        return self::attempt($config, $url, $options, $retry + 1, $redirects);
+        return [$ok, $error, $status, $message, $responseHeaders, $body];
     }
 
     /**
@@ -151,17 +164,36 @@ final class HttpClient
         ];
     }
 
-    private static function safeUrlLabel(string $url): string
+    /**
+     * Where a redirect response sends the request next, or null when it is not followed.
+     *
+     * @param array<string, string|list<string>> $responseHeaders
+     */
+    private static function redirectTarget(Config $config, string $url, int $status, array $responseHeaders): ?string
     {
-        return Url::parse($url)?->label() ?? '[unparseable-url]';
+        if (!Redirect::isStatus($status)) {
+            return null;
+        }
+
+        $target = Redirect::target($url, $responseHeaders['location'] ?? null);
+        if ($target === null) {
+            return null;
+        }
+
+        // Checked even with egress off: a redirect can introduce what the caller never sent.
+        if (Url::parse($target) === null) {
+            throw new HttpClientException('HTTP client redirect URL rejected', $target);
+        }
+        // A cross-origin hop carries no credentials, but its path, query and response would
+        // still travel in the clear, unauthenticated.
+        if (Redirect::isDowngrade($url, $target)) {
+            throw new HttpClientException('HTTP client redirect downgrade rejected', $target);
+        }
+        if (!$config->egress->allows($target)) {
+            throw new HttpClientException('HTTP client redirect egress blocked', $target);
+        }
+
+        return $target;
     }
 
-    /** Unparseable on either side counts as a different origin, so headers stay behind. */
-    private static function sameOrigin(string $from, string $to): bool
-    {
-        $a = Url::parse($from);
-        $b = Url::parse($to);
-
-        return $a !== null && $b !== null && $a->origin() === $b->origin();
-    }
 }

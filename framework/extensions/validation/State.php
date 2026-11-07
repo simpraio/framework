@@ -45,11 +45,13 @@ final class State
         return (string)($this->input[$name] ?? '');
     }
 
-    public function isScalarOrNull(string $name): bool
+    /** A float or bool has no single text form: true would read as "1" and false as absent. */
+    public function isTextOrNull(string $name): bool
     {
         return !array_key_exists($name, $this->input)
             || $this->input[$name] === null
-            || is_scalar($this->input[$name]);
+            || is_string($this->input[$name])
+            || is_int($this->input[$name]);
     }
 
     public function isBlank(mixed $value): bool
@@ -60,22 +62,19 @@ final class State
     public function blank(string $name, bool $optional): null
     {
         if (!$optional) {
-            $this->errors[$name] = 'required';
+            $this->fail($name, 'required');
         }
 
         return null;
     }
 
+    /** A field with an error never has a value, whichever of its rules ran first. */
     public function fail(string $name, string $code): null
     {
+        unset($this->values[$name]);
         $this->errors[$name] = $code;
 
         return null;
-    }
-
-    public function unsetValue(string $name): void
-    {
-        unset($this->values[$name]);
     }
 
     /**
@@ -85,7 +84,9 @@ final class State
      */
     public function pass(string $name, mixed $value): mixed
     {
-        $this->values[$name] = $value;
+        if (!array_key_exists($name, $this->errors)) {
+            $this->values[$name] = $value;
+        }
 
         return $value;
     }

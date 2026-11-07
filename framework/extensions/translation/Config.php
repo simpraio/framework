@@ -22,7 +22,7 @@ final readonly class Config
     public static function fromArray(array $raw): self
     {
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.translation.enabled', true),
+            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.translation.enabled', false),
             cacheTtl: max(0, Cast::int($raw['cache_ttl'] ?? null, 'extensions.translation.cache_ttl', 3600)),
         );
     }

@@ -80,23 +80,31 @@ final class Bundle
             limit: 1,
         ) ?? $src;
 
-        /** @var array{0: array{string, int}, 1: array{string, int}} $m */
-        if (preg_match('/^\s*namespace\s+([^;]+);\s*/m', $src, $m, PREG_OFFSET_CAPTURE) !== 1) {
+        // Split at the first namespace statement: what precedes it, the name, and the body after it.
+        $parts = preg_split('/^\s*namespace\s+([^;]+);\s*/m', $src, limit: 2, flags: PREG_SPLIT_DELIM_CAPTURE);
+        if ($parts === false || count($parts) !== 3) {
             return "namespace {\n" . trim($src) . "\n}";
         }
 
-        $ns = trim($m[1][0]);
-        $body = substr($src, $m[0][1] + strlen($m[0][0]));
-        return "namespace {$ns} {\n" . trim($body) . "\n}";
+        [, $ns, $body] = $parts;
+        return 'namespace ' . trim($ns) . " {\n" . trim($body) . "\n}";
     }
 
     private static function write(string $outFile, string $body): void
     {
         Directory::ensure(dirname($outFile), 0o700, 'Bundle: cannot create bundle directory');
-        $pid = getmypid();
-        $tmp = $outFile . '.tmp.' . ($pid === false ? '0' : (string)$pid);
+        // Random, not the process id: processes in different PID namespaces can share a bundle directory,
+        // and the first write below truncates without a lock.
+        $tmp = $outFile . '.tmp.' . bin2hex(random_bytes(8));
 
-        if (Silently::call(static fn(): int|false => file_put_contents($tmp, $body, LOCK_EX)) === false) {
+        // A bundle is PHP the framework executes, and the config bundle holds the committed config/*.php,
+        // where a project may still have put a secret: the file is owner-only before anything is written
+        // to it, whatever the process umask.
+        if (Silently::call(static fn(): int|false => file_put_contents($tmp, data: '')) === false
+            || !Silently::call(static fn(): bool => chmod($tmp, permissions: 0o600))
+            || Silently::call(static fn(): int|false => file_put_contents($tmp, $body, LOCK_EX)) === false
+        ) {
+            Silently::call(static fn(): bool => unlink($tmp));
             throw new RuntimeException("Bundle: cannot write temporary file: {$tmp}");
         }
 

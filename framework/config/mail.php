@@ -16,7 +16,7 @@ return [
                 'encryption' => 'tls',  // 'tls', 'ssl', or 'none'
                 'auth'       => true,
                 'username'   => '',
-                'password'   => '',     // use framework.local.php or env - never commit
+                'password'   => '',     // use framework.local.php - never commit
                 'timeout'    => 30,
             ],
         ],

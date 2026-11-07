@@ -32,7 +32,7 @@ final class Options
             CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_PROTOCOLS_STR => implode(',', $config->allowedProtocols),
             CURLOPT_CONNECTTIMEOUT => self::timeout($options->connectTimeout, $config->connectTimeout),
-            CURLOPT_TIMEOUT => self::timeout($options->timeout, $config->timeout),
+            CURLOPT_TIMEOUT => self::callTimeout($config, $options),
             CURLOPT_HEADER => false,
             CURLOPT_VERBOSE => false,
             CURLOPT_URL => $url,
@@ -73,6 +73,12 @@ final class Options
         $userAgent = ini_get('user_agent');
 
         return is_string($userAgent) && $userAgent !== '' ? $userAgent : 'SIMPRA HTTP request/1.0';
+    }
+
+    /** Seconds for the whole call - every attempt, retry delay and redirect hop together. */
+    public static function callTimeout(Config $config, RequestOptions $options): int
+    {
+        return self::timeout($options->timeout, $config->timeout);
     }
 
     private static function timeout(?int $value, int $default): int

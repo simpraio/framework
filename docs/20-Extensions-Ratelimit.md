@@ -17,6 +17,8 @@ return [
 ];
 ```
 
+`enabled` is `false` when the key is missing, as for `csrf` and `auth`, so the hook counts only when it is set to `true`. `max` and `window` must each be at least `1`: a lower value throws `InvalidArgumentException` when the configuration is read, since a `window` of `0` keeps a counter that never expires and a `max` below `1` answers `429` to every request.
+
 The `before()` hook applies this budget to requests backed by a controller or template. Missing routes return `404` before route hooks, so they are not counted. It runs ahead of the other bundled hooks (`PRIORITY = -100`, see [Extensions](10-Extensions.md#order)), so a request that `auth` redirects or `csrf` rejects still counts. This is application-level abuse control, not infrastructure-level DoS protection; use your reverse proxy, CDN, WAF, or hosting provider when broader traffic protection is required. When the limit is exceeded, the response is `429 Too Many Requests` with a plain-text body.
 
 ## Public API

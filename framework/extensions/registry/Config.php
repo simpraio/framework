@@ -21,7 +21,7 @@ final readonly class Config
     public static function fromArray(array $raw): self
     {
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.registry.enabled', true),
+            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.registry.enabled', false),
             cacheTtl: max(0, Cast::int($raw['cache_ttl'] ?? null, 'extensions.registry.cache_ttl', 60)),
         );
     }

@@ -133,6 +133,8 @@ The shipped project config decides what loads. Most bundled extensions are disab
 ],
 ```
 
+Whether an extension runs is read on every request, so turning one on or off in the local file or an environment variable takes effect without deleting `cache/extensions.php`. Adding or removing an extension folder still needs the bundle deleted.
+
 ### Order
 
 Hooks and contributors run by the `PRIORITY` constant on the extension's `Boot` class: lower runs first, and the default is `0`. Extensions with the same priority run in folder-name order. The first `before()` hook to return a non-null Response wins, so a hook that must see every request runs ahead of hooks that turn requests away:
@@ -146,7 +148,7 @@ final class Boot extends ExtensionBoot implements Hook
 
 Declare it exactly so - `public const int`: the base class declares a typed constant, and an untyped or non-public one is a fatal error. The order is applied when the hooks are created, so it holds even with an extensions bundle built before a priority changed.
 
-Among the bundled extensions only `ratelimit` sets a priority (`-100`), so it counts requests that `auth` or `csrf` turn away.
+Among the bundled extensions two set a priority: `ratelimit` (`-100`), so it counts requests that `auth` or `csrf` turn away, and `security` (`100`), so it decides a response's cache headers from its final status and from a session any other bundled hook started. An extension of your own that starts a session or sets a cookie in `after()` needs a priority below `100`, or `security` decides without it.
 
 ## Bundled Extensions
 
@@ -156,7 +158,7 @@ Among the bundled extensions only `ratelimit` sets a priority (`-100`), so it co
 | `csrf` | Hook | CSRF token validation on mutating requests (POST, PUT, PATCH, DELETE). Replaces `{_csrf}` placeholder with the token in HTML responses. |
 | `error-log` | Bootable, Hook | Writes unhandled exceptions to the `error_log` database table. Prunes old entries daily. Schema: `tools/schema/error-log.sql`. |
 | `events` | Bootable | Initialises a global event dispatcher. Use the `Event` static facade to register listeners (`Event::on()`) and dispatch (`Event::dispatch()`). |
-| `flash` | Contributor | Session flash messages for validation errors and old input. Provides `Flash` static facade and the `{hasErrors}` block. |
+| `flash` | Contributor | Session flash messages for validation errors and old input. Provides `Flash` static facade and the `{HasErrors}` block. |
 | `http-client` | Bootable | cURL-based HTTP client with retry logic, TLS verification, egress checks, and response size limits. Used mainly as a utility class (`HttpClient::get()`, `HttpClient::post()`); its `Bootable` boot only emits a startup warning when TLS verification is disabled. |
 | `mail` | - | Email sending via SMTP or PHP `mail()`. No hooks - use the `Mail` static facade to compose and send messages from controllers. |
 | `oidc-login` | Contributor | Microsoft and Google sign-in through one explicit API, with optional tenant/group/domain restrictions. No database or dependency on local `auth`; application controllers own the callbacks and any local-account registration. See [OIDC Login](18-Extensions-OIDC-Login.md). |
@@ -166,4 +168,4 @@ Among the bundled extensions only `ratelimit` sets a priority (`-100`), so it co
 | `security` | Hook | Adds HTTP security headers (CSP, X-Frame-Options, Permissions-Policy, etc.) to every response via `after()`. Configurable per header in `config/security.php`. |
 | `seo` | Contributor | Injects per-route title, description, and canonical URL into the layout from the `seo` database table, with config fallbacks. Schema: `tools/schema/seo.sql`. |
 | `translation` | Contributor | Loads translation strings from the `translation` database table and injects them as raw tokens into the layout and page templates. Schema: `tools/schema/translation.sql`. |
-| `validation` | - | Chainable form validator. No hooks - instantiate `Validator` directly in a controller with the input array and call rule methods to collect errors. |
+| `validation` | - | Form validator. No hooks - instantiate `Validator` directly in a controller with the input array; each rule method returns the typed value or `null` and records failures for `ok()`, `errors()` and `values()`. |

@@ -20,7 +20,7 @@ final readonly class Config
     public static function fromArray(array $raw): self
     {
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.flash.enabled', true),
+            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.flash.enabled', false),
         );
     }
 

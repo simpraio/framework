@@ -14,6 +14,7 @@ require_once $core . '/config/Egress.php';
 require_once $core . '/config/loader/Env.php';
 require_once $core . '/config/loader/Files.php';
 require_once $core . '/config/Compiler.php';
+require_once $core . '/config/MisspeltKeys.php';
 require_once $core . '/config/RedactsSecrets.php';
 require_once $core . '/config/dto/Project.php';
 require_once $core . '/config/dto/Route.php';
@@ -41,6 +42,7 @@ require_once $core . '/http/Router.php';
 require_once $core . '/cache/Memory.php';
 require_once $core . '/cache/Apcu.php';
 require_once $core . '/cache/Cache.php';
+require_once $core . '/cache/OnceFile.php';
 require_once $core . '/cache/Optional.php';
 
 require_once $core . '/log/Writer.php';

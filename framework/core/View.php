@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace core;
 
 use core\cache\Cache;
+use core\tools\Identifier;
 use InvalidArgumentException;
 
 final readonly class View
@@ -34,7 +35,7 @@ final readonly class View
         }
 
         $content = Cache::remember(
-            'tpl.' . $name,
+            'tpl.' . Identifier::fastHash($path),
             static fn(): string => (string) file_get_contents($path),
             self::CACHE_TTL,
         );

@@ -60,7 +60,7 @@ final readonly class Config
             );
         }
 
-        $enabled = Cast::bool($raw['enabled'] ?? null, 'extensions.http-client.enabled', true);
+        $enabled = Cast::bool($raw['enabled'] ?? null, 'extensions.http-client.enabled', false);
         $egress = Egress::fromArray(Map::section($raw, 'egress'));
 
         // Proxy-side DNS cannot honor the application's validated-address pins.
@@ -78,7 +78,7 @@ final readonly class Config
             enabled: $enabled,
             retries: max(0, Cast::int($raw['retries'] ?? null, 'extensions.http-client.retries', 5)),
             retryDelay: max(0, Cast::int($raw['retry_delay'] ?? null, 'extensions.http-client.retry_delay', 1)),
-            timeout: max(1, Cast::int($raw['timeout'] ?? null, 'extensions.http-client.timeout', 10)),
+            timeout: max(1, Cast::int($raw['timeout'] ?? null, 'extensions.http-client.timeout', 60)),
             connectTimeout: max(1, Cast::int($raw['connect_timeout'] ?? null, 'extensions.http-client.connect_timeout', 10)),
             verifyTls: $verifyTls,
             maxResponseBytes: max(1, Cast::int($raw['max_response_bytes'] ?? null, 'extensions.http-client.max_response_bytes', 10_485_760)),

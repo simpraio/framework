@@ -37,10 +37,15 @@ final readonly class Config
         $logout = Cast::string($raw['logout_redirect'] ?? null, 'extensions.auth.logout_redirect');
         $guest = Cast::string($raw['guest_route'] ?? null, 'extensions.auth.guest_route', 'login');
         $denied = Cast::string($raw['denied_redirect'] ?? null, 'extensions.auth.denied_redirect');
+        $sessionKey = Cast::string($raw['session_key'] ?? null, 'extensions.auth.session_key', 'user.data');
+        if ($sessionKey === '') {
+            // A login would be stored under '' while every request reads '' as a guest.
+            throw new InvalidArgumentException("Config: 'extensions.auth.session_key' must not be empty");
+        }
 
         return new self(
             enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.auth.enabled', false),
-            sessionKey: Cast::string($raw['session_key'] ?? null, 'extensions.auth.session_key', 'user.data'),
+            sessionKey: $sessionKey,
             guestGroup: Cast::string($raw['guest_group'] ?? null, 'extensions.auth.guest_group', 'guest'),
             logoutRedirect: self::redirectPath($logout),
             rateLimitAttempts: max(

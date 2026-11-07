@@ -167,7 +167,7 @@ Format::escape($userInput);                     // HTML-escaped and trimmed
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Format::escape($value, $trim = true)` | `string` | Casts to string and HTML-escapes it as `tokens()` does (`ENT_QUOTES`, `ENT_SUBSTITUTE`, UTF-8). Trims surrounding whitespace unless `$trim` is `false`. |
+| `Format::escape($value, $trim = true)` | `string` | Casts to string and escapes it as `tokens()` does: HTML (`ENT_QUOTES`, `ENT_SUBSTITUTE`, UTF-8), and `{` and `}` as `&#123;` and `&#125;`, so the result can go into a page with `rawTokens()` without forming a token or block marker there. Trims surrounding whitespace unless `$trim` is `false`. |
 | `Format::template($text, $data = [])` | `string` | Replaces `{KEY}` markers: each key of `$data` is upper-cased, so `['name' => …]` fills `{NAME}` and leaves `{name}` alone. **Values are not escaped** - use it for plain text such as a mail subject, never for HTML; for HTML use `Template::tokens()`. |
 | `Format::datetime($timestamp = null, $format = 'Y-m-d H:i:s.u')` | `string` | Formats a Unix timestamp with microseconds - now when `null` - in `project.timezone`. Throws `InvalidArgumentException` for a timestamp that cannot be represented. |
 | `Format::slug($text)` | `string` | A lower-case URL segment: tags stripped, letters transliterated to ASCII, and every run of other characters turned into one `-`, with none at either end. Characters without an ASCII equivalent, such as CJK, are dropped, so the result can be empty. |

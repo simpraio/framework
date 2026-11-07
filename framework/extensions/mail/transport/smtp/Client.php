@@ -8,6 +8,7 @@ use extensions\mail\Envelope;
 use extensions\mail\LineEnding;
 use RuntimeException;
 use SensitiveParameter;
+use Throwable;
 
 final readonly class Client
 {
@@ -96,7 +97,26 @@ final readonly class Client
         $this->command('DATA', 354);
 
         $this->connection->write(self::buildPayload($envelope) . "\r\n.\r\n");
-        self::expect($this->connection->read(), 250);
+        $this->expectDataVerdict();
+    }
+
+    /**
+     * With the terminator written the server may already have committed the message, so anything
+     * but its own reply leaves the delivery unknown rather than failed: a caller retrying it could
+     * deliver the message twice. For the same reason any 2xx counts as accepted, though RFC 5321
+     * answers the data with 250.
+     */
+    private function expectDataVerdict(): void
+    {
+        try {
+            self::expect($this->connection->read(), range(start: 200, end: 299));
+        } catch (Throwable $e) {
+            if (str_starts_with($e->getMessage(), 'SMTP:')) {
+                throw $e;
+            }
+
+            throw new RuntimeException('SMTP_DELIVERY_UNKNOWN: ' . $e->getMessage(), previous: $e);
+        }
     }
 
     public function quit(): void
@@ -121,7 +141,7 @@ final readonly class Client
             throw new RuntimeException('SMTP_EMPTY_RESPONSE');
         }
 
-        if (preg_match('/^\d{3}[ -]/', $response) !== 1) {
+        if (preg_match('/^\d{3}([ -]|\r?\n)/', $response) !== 1) {
             throw new RuntimeException('SMTP_INVALID_RESPONSE');
         }
 
@@ -138,16 +158,19 @@ final readonly class Client
         $headers = $envelope->headersBlock(['Subject', 'To']);
         $sep = $headers !== '' ? $eol : '';
 
-        return $headers . $sep
+        // RFC 5321 4.5.2: transparency covers every line of DATA, headers included.
+        return self::dotStuff(
+            $headers . $sep
             . 'Subject: ' . $envelope->subject . $eol
             . 'To: ' . $envelope->recipientsLine() . $eol
             . $eol
-            . self::dotStuff(LineEnding::crlf($envelope->body));
+            . LineEnding::crlf($envelope->body),
+        );
     }
 
-    private static function dotStuff(string $body): string
+    private static function dotStuff(string $data): string
     {
-        return (string)preg_replace(pattern: '/^\./m', replacement: '..', subject: $body);
+        return (string)preg_replace(pattern: '/^\./m', replacement: '..', subject: $data);
     }
 
 }

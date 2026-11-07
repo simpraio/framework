@@ -13,6 +13,7 @@ use core\config\dto\Route;
 use core\config\dto\Session;
 use core\config\loader\Env;
 use core\config\loader\Files;
+use core\log\SensitiveKeys;
 use core\Paths;
 use RuntimeException;
 
@@ -50,7 +51,8 @@ final class Config
         );
 
         $bundlePath = $paths->bundleDir . '/' . Bundle::CONFIG_FILE;
-        if (is_file($bundlePath)) {
+        // A bundle another account built is owner-only and unreadable here: rebuild it like a missing one.
+        if (is_readable($bundlePath)) {
             /** @var array<string, mixed> $defaults */
             $defaults = require $bundlePath;
             self::hydrate($compiler, $defaults);
@@ -73,6 +75,7 @@ final class Config
         self::$session = Session::fromArray(self::section('session'));
         self::$log = Log::fromArray(self::section('log'));
         self::$extensionConfigs = [];
+        self::$database = null;
     }
 
     public static function project(): Project
@@ -116,6 +119,24 @@ final class Config
     public static function log(): Log
     {
         return self::$log;
+    }
+
+    /**
+     * Every configured string the log must not write: those under a key SensitiveKeys or
+     * log.redact_keys names - project.crypt_key, database.password, extensions.mail.smtp.password, an
+     * OIDC client_secret - from every layer, environment included.
+     *
+     * Only for stripping these values from what is logged - the log file, the error handler's error_log()
+     * lines, the error-log extension's rows. They are returned in plaintext, so never log, render or
+     * store the result itself.
+     *
+     * @internal
+     * @return list<string>
+     * @throws RuntimeException when the configured secrets cannot be collected within bounded resources
+     */
+    public static function secrets(): array
+    {
+        return SensitiveKeys::values(self::$compiled, SensitiveKeys::index(self::$log->redactKeys));
     }
 
     /**

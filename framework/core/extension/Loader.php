@@ -17,11 +17,10 @@ final class Loader
     public static function buildMap(string $dir): array
     {
         $map = [];
+        // Every extension goes into the map, enabled or not: the local file and environment variables
+        // are read on every request, so which of them run is decided in instantiate(), not here.
         foreach (self::folders($dir) as $name) {
             $configFile = "{$dir}/{$name}/Config.php";
-            if (!self::isEnabled($name, $configFile)) {
-                continue;
-            }
             $class = 'extensions\\' . self::namespaceName($name) . '\\Boot';
             $file = "{$dir}/{$name}/Boot.php";
             if (is_file($file)) {
@@ -55,6 +54,9 @@ final class Loader
                 if ($boot['config'] !== null) {
                     require_once $boot['config'];
                 }
+            }
+            if (!self::isEnabled(basename(dirname($boot['file'])), $boot['config'])) {
+                continue;
             }
 
             if (!class_exists($class)) {
@@ -103,11 +105,11 @@ final class Loader
         return $found === false ? [] : array_map(basename(...), $found);
     }
 
-    private static function isEnabled(string $name, string $configFile): bool
+    private static function isEnabled(string $name, ?string $configFile): bool
     {
         $raw = Config::extension($name);
 
-        if (!is_file($configFile)) {
+        if ($configFile === null) {
             return filter_var($raw['enabled'] ?? true, FILTER_VALIDATE_BOOL);
         }
 
@@ -115,24 +117,28 @@ final class Loader
         if (!class_exists($class, false)) {
             require_once $configFile;
         }
+        // A Config.php that declares no Config class leaves the extension enabled, as one without fromArray() does.
+        if (!class_exists($class, false)) {
+            return true;
+        }
 
-        $config = self::config($class, $raw);
+        $config = self::config($name, $class);
         return ($config->enabled ?? true) === true;
     }
 
     /**
+     * Through the core config's cache, keyed as the extension's own hooks look it up, so deciding on
+     * every request that an extension runs does not build its Config a second time.
+     *
      * @param class-string $class
-     * @param array<string, mixed> $raw
      */
-    private static function config(string $class, array $raw): object
+    private static function config(string $name, string $class): object
     {
         if (!method_exists($class, 'fromArray')) {
             return (object)['enabled' => true];
         }
 
-        /** @var mixed $config */
-        $config = $class::fromArray($raw);
-        return is_object($config) ? $config : (object)['enabled' => true];
+        return Config::extensionConfig($name, $class);
     }
 
     private static function namespaceName(string $folder): string

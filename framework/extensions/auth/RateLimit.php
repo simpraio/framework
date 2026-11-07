@@ -12,15 +12,17 @@ use core\tools\Silently;
 use RuntimeException;
 
 /**
- * Fixed-window limits per IP+username and per IP; never per username alone,
+ * Fixed-window limits per IP+account and per IP; never per account alone,
  * which would let unauthenticated attackers lock out another host's account.
- * APCu and the locked-file fallback coordinate only on one host.
+ * Every attempt is counted before it is checked, so a burst of concurrent attempts cannot all pass a
+ * limit none of them has counted yet. APCu and the locked-file fallback coordinate only on one host.
  */
 final class RateLimit
 {
-    private static function pairKey(string $username): string
+    /** $subject names the account, or the name tried when none matches. */
+    private static function pairKey(string $subject): string
     {
-        return 'auth.login.rl.' . Identifier::fastHash(strtolower($username) . '|' . Request::ip());
+        return 'auth.login.rl.' . Identifier::fastHash($subject . '|' . Request::ip());
     }
 
     private static function ipKey(): string
@@ -28,63 +30,53 @@ final class RateLimit
         return 'auth.login.rl.ip.' . Identifier::fastHash(Request::ip());
     }
 
-    public static function blocked(string $username): bool
+    public static function ipAttempt(): bool
     {
         $config = Config::enabled();
 
-        $pairKey = self::pairKey($username);
-        $ipKey = self::ipKey();
-
-        $pairAttempts = max((int) Cache::get($pairKey, 0), self::fileGet($pairKey));
-        if ($pairAttempts >= $config->rateLimitAttempts) {
-            return true;
-        }
-
-        $ipAttempts = max((int) Cache::get($ipKey, 0), self::fileGet($ipKey));
-        return $ipAttempts >= $config->rateLimitAttempts * 4;
+        return self::count(self::ipKey(), 1, $config->rateLimitWindow) <= $config->rateLimitAttempts * 4;
     }
 
-    public static function fail(string $username): void
+    public static function accountAttempt(string $subject): bool
     {
         $config = Config::enabled();
 
-        $window = $config->rateLimitWindow;
-        $pairKey = self::pairKey($username);
-        $ipKey = self::ipKey();
-
-        $pairCount = Cache::inc($pairKey, 1, $window);
-        $ipCount = Cache::inc($ipKey, 1, $window);
-
-        if ($pairCount === false || $ipCount === false) {
-            self::fileInc($pairKey, $window);
-            self::fileInc($ipKey, $window);
-        }
+        return self::count(self::pairKey($subject), 1, $config->rateLimitWindow) <= $config->rateLimitAttempts;
     }
 
     /**
-     * A successful login must not reset the IP's enumeration budget.
+     * Hands the attempt back to the IP's count without resetting it, so a successful login does not
+     * restore an enumeration budget, and clears the account's.
      */
-    public static function clear(string $username): void
+    public static function succeeded(string $subject): void
     {
-        Config::enabled();
+        $config = Config::enabled();
 
-        Cache::delete(self::pairKey($username));
-        self::fileDelete(self::pairKey($username));
+        Cache::delete(self::pairKey($subject));
+        self::fileDelete(self::pairKey($subject));
+        self::count(self::ipKey(), -1, $config->rateLimitWindow);
     }
 
-    private static function fileGet(string $key): int
+    private static function count(string $key, int $step, int $window): int
     {
-        $path = self::filePath($key);
-        $counter = self::fileRead($path);
+        // Checked before APCu counts anything: a successful login clears the file counter as well,
+        // and an unsafe directory must refuse the attempt here, not after the session holds the user.
+        CounterDirectory::path();
 
-        if ($counter === null || $counter['expires'] <= time()) {
+        $count = Cache::inc($key, $step, $window);
+        if ($count === false) {
+            return self::fileInc($key, $window, $step);
+        }
+        // A hand-back after its window expired starts a new counter below zero; the file fallback floors it too.
+        if ($count < 0) {
+            Cache::delete($key);
             return 0;
         }
 
-        return $counter['attempts'];
+        return $count;
     }
 
-    private static function fileInc(string $key, int $window): void
+    private static function fileInc(string $key, int $window, int $step): int
     {
         $path = self::filePath($key);
 
@@ -98,10 +90,10 @@ final class RateLimit
                 throw new RuntimeException("AUTH_RATE_LIMIT_FILE_LOCK_FAILED: {$path}");
             }
 
-            $counter = self::fileReadHandle($fp);
-            self::fileWriteHandle($fp, self::nextCounter($counter, time(), $window));
+            $counter = self::nextCounter(self::fileReadHandle($fp), time(), $window, $step);
+            self::fileWriteHandle($fp, $counter);
 
-            return;
+            return $counter['attempts'];
         } finally {
             flock($fp, LOCK_UN);
             fclose($fp);
@@ -114,13 +106,13 @@ final class RateLimit
      * @param array{attempts: int, expires: int}|null $counter
      * @return array{attempts: int, expires: int}
      */
-    private static function nextCounter(?array $counter, int $now, int $window): array
+    private static function nextCounter(?array $counter, int $now, int $window, int $step): array
     {
         if ($counter === null || $counter['expires'] <= $now) {
-            return ['attempts' => 1, 'expires' => $now + $window];
+            return ['attempts' => max(0, $step), 'expires' => $now + $window];
         }
 
-        return ['attempts' => $counter['attempts'] + 1, 'expires' => $counter['expires']];
+        return ['attempts' => max(0, $counter['attempts'] + $step), 'expires' => $counter['expires']];
     }
 
     private static function fileDelete(string $key): void
@@ -134,26 +126,6 @@ final class RateLimit
     private static function filePath(string $key): string
     {
         return CounterDirectory::path() . '/' . Identifier::fastHash(Instance::prefix() . $key) . '.json';
-    }
-
-    /** @return array{attempts: int, expires: int}|null */
-    private static function fileRead(string $path): ?array
-    {
-        $fp = Silently::call(static fn() => fopen(filename: $path, mode: 'r'));
-        if ($fp === false) {
-            return null;
-        }
-
-        try {
-            if (!flock($fp, LOCK_SH)) {
-                return null;
-            }
-
-            return self::fileReadHandle($fp);
-        } finally {
-            flock($fp, LOCK_UN);
-            fclose($fp);
-        }
     }
 
     /**

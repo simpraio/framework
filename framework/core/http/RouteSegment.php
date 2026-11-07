@@ -14,6 +14,11 @@ final class RouteSegment
         if ($segment === '' || strspn($segment, self::CHARS) !== strlen($segment)) {
             return null;
         }
+        // A controller's class name drops the hyphens, so a leading, trailing or doubled one would give
+        // the same controller another path - one a rule keyed on the path does not cover.
+        if ($segment[0] === '-' || str_ends_with($segment, '-') || str_contains($segment, '--')) {
+            return null;
+        }
 
         return $segment;
     }

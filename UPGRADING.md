@@ -23,6 +23,7 @@ review the diff yourself. Give it this prompt:
 You are upgrading a Simpra project to the Simpra release in this package.
 
 Read VERSION, UPGRADING.md, and CHANGELOG.md first.
+Record the installed project version and the target package's VERSION separately before replacing files.
 
 Current project version:
 - If VERSION exists, use it.
@@ -39,15 +40,17 @@ Rules:
 - Do not install packages.
 - Do not refactor unrelated code.
 - Do not run destructive commands such as git reset, git clean, or recursive deletion.
+- After the migration steps and validation succeed, update the project-root VERSION to the target package's VERSION. If validation remains pending or fails, leave the installed VERSION unchanged and report that.
 - After changes, summarize the diff and list anything I must review manually.
 ```
 
 After the AI finishes, review its diff, clear the bundle cache, run your tests,
-and smoke-test staging with `project.debug = false`.
+and smoke-test staging with `project.debug = false`. Once validation succeeds, ensure the
+project-root `VERSION` records the target release; do not update it after a failed or partial upgrade.
 
 ## Manual Procedure
 
-1. Check your current `VERSION`, then read every version section between that version and this release. Changes are cumulative.
+1. Record your current `VERSION` and the target package's `VERSION` separately, then read every version section between them. Changes are cumulative.
 2. Upgrade on a branch, or back up the project first.
 3. Copy the new framework files over the old framework files. Do not overwrite your own `config/`, `framework.local.php`, `app/`, `modules/`, `templates/`, `logs/`, or uploads.
 4. Apply the Required steps for each version below, and any Conditional steps that match how you use the framework.
@@ -60,6 +63,456 @@ and smoke-test staging with `project.debug = false`.
    If you use `SIMPRA_BUNDLE_DIR`, clear that directory instead.
 
 6. Run your test suite and smoke-test staging with `project.debug = false`.
+7. Only after the upgrade steps and validation succeed, update the project-root `VERSION` to the target package's `VERSION`. Leave it unchanged if the upgrade is incomplete or a check fails.
+
+## 5.2.0 -> 5.3.0
+
+**Impact:** the compiled bundles and new log files are no longer readable by other accounts,
+and a bundle the serving account cannot read is rebuilt instead of failing the request. One
+new optional tool, `tools/migrate.php`, applies MariaDB migrations at deploy time. The error
+page's blocks are renamed. A cache policy in `extensions.security.headers` no longer reaches
+a response bound to one visitor or one request, which gets `Cache-Control: no-store` instead,
+and any other response that sets a cache header itself, on the `Response` or with `header()`,
+keeps it rather than taking the configured one (Good to know 3). This release also closes a
+full review's findings: a controller answers on one URL spelling only, a logout ends a
+session nothing had read, login attempts are counted before they are checked, and several
+APIs now refuse input they used to accept or quietly drop - Conditional 5 to 18 name each
+one. It takes fixes from Simpra Server too: a misspelt local config key or a malformed config
+file now stops the boot, while an empty map over committed settings preserves those settings
+instead of clearing them, so read Conditional 16 before deploying. Log context is redacted
+by default (Conditional 17). There are no schema
+changes. Every project needs both Required steps. If CLI jobs and
+the web server run under different accounts, Conditional 1 applies as well: without it,
+those jobs fail after the upgrade. A site that lets a CDN cache its pages should read
+Conditional 3 if it uses a CSP nonce, and Conditional 4 if the CDN or a load balancer
+authenticates to the origin with `Authorization`: those pages are no longer cached.
+
+### Required
+
+1. In your project's own `public/index.php`, change `is_file($cache)` to
+   `is_readable($cache)`. The bundles are now written `0600`, so a `core.php` that another
+   account built - a CLI job run after the cache was cleared - cannot be read by the web
+   server. With `is_file()` the front controller still tries to `require` it, and every
+   request fails until the file is removed. The framework's own loaders already make this
+   check; the front controller is the one copy your project owns.
+2. Rename the blocks in your project's own `templates/error.html` to PascalCase, as the
+   handbook requires of every block: `is403`, `is404`, `isBug`, `isDebug` and `isNotDebug`
+   become `Is403`, `Is404`, `IsBug`, `IsDebug` and `IsNotDebug`, closing markers included:
+
+   ```sh
+   perl -pi -e 's/\{(-?)is(403|404|Bug|Debug|NotDebug)\}/{$1Is$2}/g' templates/error.html
+   ```
+
+   The framework answers only the new names. A block left under its old name is not answered
+   and stays in the page verbatim, markers and content alike, so the debug section's markup
+   shows in production; its detail tokens stay empty there. `tests/core/error_handler.php`
+   fails on any marker left in the project's error page.
+
+### Conditional
+
+1. If the web server and CLI jobs run under different accounts, neither can read the
+   bundles the other built any more - 5.2.0 wrote them readable to all - so each rebuilds
+   them, and a rebuild needs write access to the bundle directory (`cache/`, or
+   `SIMPRA_BUNDLE_DIR`). With the usual `chmod 755 cache/` owned by the web server, every CLI
+   job now fails with `Bundle: cannot write temporary file`. Run CLI jobs as the web server's
+   account, or give both write access through a shared group (`chmod 2770 cache/`); in the
+   second case each rebuilds the bundles whenever it runs after the other.
+2. Log files created before this upgrade keep their mode. Restrict them once, for example
+   `chmod 640 logs/*.log`, or `660` if the web server and CLI jobs share a group and both
+   append. If another account reads the logs without being in their group, such as a log
+   shipper, add it to the group: it no longer reads new files as "other".
+3. If you let a CDN cache your pages through a public `Cache-Control` in
+   `extensions.security.headers` and your CSP uses `{_csp_nonce}` - the shipped default
+   does - your HTML pages are now sent with `no-store` and are no longer cached: a nonce
+   is fresh for each response, and a cached one would be the same for every visitor. To
+   keep them cached, use a CSP without a nonce (`script-src 'self'`, with no inline
+   scripts) and remove `nonce="{_csp_nonce}"` from your templates.
+4. If you let a CDN cache your pages through a public policy in
+   `extensions.security.headers` and the CDN or a load balancer authenticates itself to the
+   origin with `Authorization` - or passes on HTTP authentication guarding the origin - every
+   response, error pages included, is now sent with `no-store`, so no page is cached: a
+   request carrying credentials counts as bound to whoever sent it. Files the web server
+   serves from `public/` directly are unaffected. To keep pages cached, send origin
+   authentication in a header of its own and check it in the web server or your application.
+5. If a link, an alias row or a client uses a URL segment with a leading, trailing or
+   doubled hyphen (`/blog/my-post-`, `/blog/my--post`), or reaches a controller under a
+   spelling other than its class's (`/blog/mypost` for `MyPost` on a case-insensitive
+   filesystem), it now answers `404`. Each controller answers on one spelling, so a rule
+   keyed on its path covers every way to reach it.
+6. If a module directory has a hyphen (`modules/my-blog/`), its controllers now run: the
+   kernel builds `modules\my_blog\Post`, as the autoloader maps it, where it used to build no
+   valid class name and render the module's templates without their controller. Check that
+   those controllers are what the pages should run, and that their namespace uses
+   underscores.
+7. `route.default_module`, `route.default_controller` and every entry of `language.available`
+   must be URL segments - lowercase letters, digits and inner hyphens - and so must
+   `language.default` while `language.available` is set. A route default with capitals is
+   lower-cased; anything else, such as `en_US`, is now a config error on boot. A language code
+   like `en_US` never matched a URL before either. With no languages in URLs, the default is
+   only a lookup key and may stay as it is.
+8. If your templates use the flash extension's block, rename it to PascalCase, closing
+   markers included:
+
+   ```sh
+   grep -rlE '\{-?hasErrors\}' templates | xargs -r perl -pi -e 's/\{(-?)hasErrors\}/{$1HasErrors}/g'
+   ```
+
+   A block left under the old name is not answered and stays in the page verbatim.
+   `Flash::hasErrors()` is unchanged.
+9. Mail. `Message::to()` throws `InvalidArgumentException('INVALID_RECIPIENT')` when an item
+   is not a valid address - `->to('a@x.test, typo@@x.test')` used to send to `a@x.test`
+   alone - and an array item must hold one address: a comma outside quotes in it is refused.
+   `"Display <x@y>" <real@z>` now goes to `real@z`. These are refused too; 5.2.0 sent some to
+   only part of the list and some correctly, so check any you use:
+   - an address or angle-addr outside quotes before the angle-addr where a comma is missing,
+     as in `jan@x.test Eva <eva@x.test>`, which went to Eva alone, or
+     `Jan <jan@x.test> Eva <eva@x.test>`, which went to Jan alone; or a quote after an
+     address. An address used as a display name must now be quoted,
+     `"jan@x.test" <jan@x.test>`;
+   - a comment after the address, as in `Name <a@x.test> (work)` - drop it;
+   - an unbalanced quote, as in `O"Brien <ob@x.test>` or `Jan\" <jan@x.test>`: a backslash
+     escapes a quote only inside a quoted string, so neither example closes its quote;
+   - a blank angle-addr, `Name < >`, and a stray `>`, `Jan <j@x.test>>`;
+   - in a string, an item whose quoted strings hold a comma and an `@` between them, as in
+     `"Doe, John (j@x.test)" <j@x.test>` or the local part `"a,@b"@x.test`;
+   - a recipient string, or an array item, over 1 MiB.
+
+   Not refused: a missed comma between display names holding stray quotes reads as one
+   display name. `a" jan@x.test b" <eva@x.test>` goes to Eva alone, as in 5.2.0; with an
+   angle-addr inside the quotes, `a" <jan@x.test> b" <eva@x.test>` now goes to Eva where
+   5.2.0 sent it to Jan. Display names are not sent, so pass an array of bare addresses when
+   they come from users. A list holding one invalid item throws `INVALID_RECIPIENT`, where
+   5.2.0 threw `NO_VALID_RECIPIENT` if no valid item was left. An address holding a control
+   character is refused, also by `Envelope`; given to `from()`, it falls back to the
+   configured address as an invalid one does. `Cc`, `Bcc`, `Content-Transfer-Encoding` and
+   header names starting with `.` set with `header()` are now dropped without an error. Over
+   SMTP a `Bcc` was never delivered and was shown to every recipient; with the `native`
+   transport `Cc` and `Bcc` were delivered and now are not. Send a separate message instead.
+   A message with only a text or only an HTML body is now a single `text/plain` or
+   `text/html` part; a test asserting `multipart/alternative` for one needs updating.
+   `extensions.mail.smtp.timeout` now bounds each server reply as a whole, and a reply over
+   64 KiB fails with `SMTP_RESPONSE_TOO_LARGE`.
+
+   **Check `extensions.mail.smtp.encryption` on every host before deploying.** It accepts only
+   `none`, `ssl` or `tls`, in any letter case. Any other value, an empty string included, used
+   to fall back to `tls` and work - `starttls` among them - and now throws `Config:
+   'extensions.mail.smtp.encryption' must be one of none, ssl, tls`. The error appears at the
+   first `Mail::send()`, not at boot, so a deploy that boots can still have every mail fail. Set
+   `tls` to keep the old behaviour.
+
+   Once the message data has been sent, a lost connection, a timeout or an unreadable reply now
+   throws `RuntimeException('SMTP_DELIVERY_UNKNOWN: <cause>')`, where it threw the cause's own
+   code (`SMTP_EMPTY_RESPONSE`, `SMTP_TIMEOUT`, ...). The message may have been delivered: if
+   your code retries failed sends, do not retry this one automatically - record it and confirm
+   delivery out of band (the relay's logs, the mailbox) before resending. `SMTP_CONNECT_FAILED`
+   with no reason available is now the bare code, without a trailing `: `, so match the code
+   rather than `SMTP_CONNECT_FAILED:`.
+10. HTTP client. `timeout`, configured or per request, now bounds the whole call - every
+    attempt, retry delay and redirect hop; raise it if a call legitimately needs more. An attempt
+    that runs out of time throws `HttpClientException` with `$curlError === 28`; when too little
+    time is left to retry, the call throws the last attempt's own error instead. A redirect from
+    `https` to `http` now fails with `HTTP client redirect downgrade rejected`: fix the
+    endpoint, or set `follow_redirects` to `false` and handle `Location` yourself.
+    `HttpClientException::$url` holds only `scheme://host[:port]`; keep the URL you requested
+    if you need its path. A redirect to another origin - a different scheme, host or port -
+    now forwards only `Accept`, `Accept-Encoding`, `Accept-Language`, `User-Agent`,
+    `Cache-Control` and `Pragma`: `X-Api-Key`, `X-Auth-Token`, any other custom header, the
+    `cookies` jar and the body stay behind, and a redirect that carried `data`, whatever its
+    status, is followed as a bodiless `GET`. An API that redirects to another host and expects
+    its credential header or payload there now answers 401/403, or sees a GET where it
+    expected a POST: call with `'follow_redirects' => false`, check the `Location` against the
+    hosts you trust and
+    repeat the request there, or call the final URL directly. Same-origin redirects are
+    unchanged.
+11. Validation. `Validator::in()` returns the matched choice in the choice's type -
+    `in('n', [1, 2])` with input `'2'` returns int `2` - so review strict comparisons on its
+    result. `datetime()` sets fields its format leaves out to zero: `Y-m-d` is midnight, and
+    `H:i` falls on 1970-01-01 rather than today. `string()` and `pattern()` refuse input that
+    is not valid UTF-8. Also:
+    - `email()` refuses control characters, whitespace, `"`, `\`, `<` and `>`, so quoted local
+      parts such as `"john doe"@example.com` fail with `email`; use `custom()` if you need
+      them. The mail extension still accepts a quoted local part without control characters.
+    - An optional `email()`, `uuid()` or `datetime()` given a non-empty array, a number or a
+      boolean now fails with the rule's code instead of being skipped, and a required one
+      reports that code instead of `required`. Send `null` or omit the key to mean absent; `[]`
+      is still read as absent there, while `string()` and `pattern()` refuse any array.
+    - `string()` and `pattern()` refuse floats and booleans with `string`; integers are still
+      read as decimal strings. Use `bool()` or `float()` for those fields.
+    - `bool()` given whitespace alone - a space, a tab, a line break - used to return `false`
+      with no error; a required one now fails with `required` and an optional one is absent. If
+      a form sends whitespace for "unchecked", pass `optional: true` and treat `null` as false,
+      or send `'0'`.
+    - A field that failed any rule is no longer in `values()`; the rule call's own return
+      value is unchanged.
+    - `pattern()` fails a value that exhausts PCRE's backtrack, recursion or JIT stack limit
+      with `pattern` instead of throwing. A malformed pattern still throws
+      `InvalidArgumentException`, under the framework's error handler too, where it used to
+      surface as an `ErrorException`.
+12. `ratelimit`: `enabled` defaults to `false` when the key is missing - the shipped
+    `config/ratelimit.php` sets it - and `max` or `window` below 1 is refused when the
+    configuration is read, even while the extension is disabled. `error-log`:
+    `retention_days = 0` now keeps every row; it used to empty the table once a day.
+13. `auth`: an empty `session_key` is a config error. Login throttling now counts every
+    attempt before checking it and keys the account counter on the account, so account
+    counters written before the upgrade, in APCu or the file fallback, are no longer read
+    and expire - the per-address counters are unchanged; `tools/prune-auth-counters.php`
+    removes the files once expired. Code of your own that called `RateLimit::blocked()`,
+    `fail()` or `clear()` must change its flow, not only the names: call `ipAttempt()` and
+    then `accountAttempt($subject)` before checking the credentials - both count the attempt
+    and return `false` once it is over the limit, and nothing replaces `fail()` - and
+    `succeeded($subject)` after a successful login. Use the subject `Auth::login()` uses,
+    `'user:'` plus the account id, or `'name:'` plus the lower-cased name when no account
+    matches, to share its counters.
+14. Tooling, after you re-vendor `tests/` and `AGENTS.md`:
+    - `tests/run_all.php` fails a generic suite that exits 0 without printing a `[PASS]` or
+      `[SKIP]` line. Your own suites in `tests/app/` run under your `tests/run.php` and are
+      unaffected.
+    - `tools/verify-vendored.php` compares the blobs committed at `HEAD`, so commit a
+      re-vendor before verifying it: an uncommitted file shows as
+      `MISSING <path> (not committed)`, and a case-only rename as
+      `MISSING <path> (committed as <other>)` plus `EXTRA <other>`. It notes uncommitted
+      changes it does not compare, compares `CLAUDE.md` with the one line `@AGENTS.md`, and,
+      run from a framework export without `tests/`, verifies `core/` and `extensions/` and
+      names the suite as not in the framework.
+    - Generic suites that need `framework.local.php` - for the database or the timezone -
+      now skip without one, so a project configured only by `SIMPRA_*` variables gets skips
+      rather than fatal errors.
+    - A project holding both `framework.local.php` and `config/framework.local.php` now runs
+      its tests against the `config/` one, as the application already did.
+    - If you copied `tools/clear-cache.php`, copy it again: the old one required `tests/`. It
+      reaches only its own process's APCu, so reload PHP-FPM or Apache to clear the web
+      server's.
+    - If you copied the auth example, add the `auth_access` allow rows for `main/login` and
+      `main/logout` that `default_policy = 'deny'` needs (see its README), rename
+      `{LOGIN_ERROR}` to `{HasLoginError}`, and check the return target with
+      `Url::isLocal()`.
+15. If your code constructs `core\config\Compiler` itself with required paths, check them
+    after `compile()` yourself, as `Config::database()` does: `new Compiler($files, $env,
+    requiredPaths: [...])` is now `new Compiler($files, $env)`. Passed by name, the argument
+    fails with `Unknown named parameter`; passed by position, PHP ignores it without an error,
+    and the check silently stops. The framework itself never passed one.
+16. Configuration. Local keys flagged as misspellings, incompatible map replacements and
+    malformed config files stop the boot. Check each point before deploying. Each host has
+    its own local file and environment, so check on the host, from the new release's
+    directory, before switching to it:
+
+    ```sh
+    php public/index.php
+    ```
+
+    A boot-time configuration refusal exits 255; check PHP's error log for the `Config: ...`
+    error. If boot succeeds and `project.allowed_hosts` is non-empty, the CLI request stops
+    at `Bad Request`, because it carries no `Host`. With an empty allowlist, the Host guard
+    is off and this command can dispatch an application route instead.
+    This is not a complete configuration or connectivity check: database configuration and
+    some extension settings are validated only when first used. For a DB-using application,
+    explicitly call `core\config\Config::database()` after its bootstrap to validate the
+    database settings, then execute `SELECT 1` through the application's configured database
+    connection. Exercise the enabled extensions on staging too. Run these checks with the
+    serving account's configuration and environment; a CLI environment may differ from FPM's.
+    Run the command as the serving account (`sudo -u www-data php public/index.php`), or
+    clear the bundle directory afterwards: it builds owner-only bundles, even for a refused
+    configuration, and the web server cannot read bundles another account built.
+    On a live request, a boot-time refusal goes only to PHP's own error log - the FPM or web
+    server log - and the browser gets a blank 500, since `display_errors` is off from the start
+    of `Kernel::boot()`.
+    - A local config key within one edit of a key your committed `config/*.php` declares - two
+      for keys of eight or more characters; letter case is ignored and two swapped neighbours
+      count as one - stops
+      the boot with an error naming the key and what it resembles, never a value. Before, such
+      a key was ignored, so `project.allowed_host` left the Host guard off and
+      `extensions.csrf.enabeld` left CSRF off. Fix the spelling, or declare the key in a
+      committed config file if it is meant, and clear the bundle after changing `config/*.php`:
+      the check compares against the bundled defaults. Only a key shaped like its match is
+      judged: a map near a declared map must share at least one of its keys - so a local-only
+      section of your own such as `blog`, `routes` or `sessions` boots beside `log`, `route` and
+      `session`, while `'sesion' => ['secure' => false]` stops the boot - and a scalar or list
+      must sit near a key that is not a map. Near `extensions.security.headers`, a map inside
+      your own section, or a declared empty array such as `database.options`, any map is judged.
+      Keys resembling none, `[]` near a map, integer keys such as PDO attributes, header names
+      under `extensions.security.headers` and keys below the first level of your own sections
+      are not judged.
+    - A map an earlier layer set can only be changed key by key. `[]` over it - `'session' =>
+      []`, `'extensions' => ['security' => []]` - now changes nothing; before, it wiped the
+      committed settings, `session.secure` and every security header included. Replacing a map
+      with `null`, `false`, a string or a list stops the boot with `Config: '<key>' is a map of
+      settings; a later layer can change its keys but not replace it with <type>`. Set the
+      map's own keys instead: `'enabled' => false` for an extension, `''` for one header.
+      `[]` over a list still clears it.
+    - A config file that returns anything but an array keyed by section name - a list, or no
+      `return` - stops the boot with `Config: <file> must return an array keyed by section name`.
+    - A setting missing from every layer now falls back to the committed default:
+      `session.secure` to `true`; `enabled` to `false` for `error-log`, `events`, `flash`,
+      `http-client`, `mail`, `registry`, `seo` and `translation`; `http-client.timeout` to
+      `60`; Microsoft OIDC `scopes` to `openid profile email`. An extension you use whose
+      `enabled` no layer sets is now off: add `'enabled' => true`. A plain-HTTP host that relied
+      on `session.secure` being absent now gets an HTTPS-only cookie: set
+      `'session' => ['secure' => false]` in that host's local file, never in committed config.
+17. Logging.
+    - Log context is redacted even with `log.redact_keys => []`. Values under `crypt_key`, and
+      under any key ending in `password`, `passwords`, `passwd`, `pwd`, `authpw`, `passphrase`,
+      `secret`, `secrets`, `token`, `tokens`, `credentials`, `authorization`, `cookie`,
+      `cookies`, `apikey`, `privatekey`, `privatekeypem`, `accesskey`, `secretkey`,
+      `signingkey`, `hmackey`, `masterkey` or `encryptionkey` - so `HTTP_AUTHORIZATION`,
+      `REDIRECT_HTTP_AUTHORIZATION`, `Proxy-Authorization`, `HTTP_COOKIE`, `Set-Cookie` and
+      `PHP_AUTH_PW` too - are written as `[REDACTED]`, nested and inside logged objects; names
+      compare with case and `_`, `-`, space and `.` ignored. `log.redact_keys` now adds to these
+      and cannot remove one. Do not rename a secret such as `reset_token` to bypass redaction;
+      log a separate non-secret correlation ID instead. Runtime tokens not held in the
+      configuration are not covered by configured-secret value stripping. A count named in
+      the plural is redacted as well (`max_tokens`): log it as `token_count`. Redaction goes
+      by key name, so a list of header
+      name/value pairs is not redacted. The `error-log` table's `url` column scrubs query names
+      by the same rule.
+    - Configured secret values of 8 bytes or more - the database and SMTP passwords, OIDC client
+      secrets, anything the configuration holds under a secret key - are now replaced with
+      `[REDACTED]` wherever they appear in a log message or context string. A dev password that
+      is also an ordinary word (`password`) is redacted wherever that word appears: use a real
+      secret. Code that constructs `core\log\Writer` itself gets this only by passing
+      `secrets: Config::secrets(...)`; existing calls work unchanged. They are also stripped from
+      context keys (a key that strips to a name already taken in the same array gets `#2`, `#3`
+      and on), from the `error-log` table's `message` and `trace`, and from the lines
+      `ErrorHandler` writes to PHP's own error log. A key ending in a secret suffix that holds a
+      public value of 8 bytes or more - `session_cookie` holding a cookie name, `csrf_token`
+      holding a field name, an endpoint map's `token` URL - has that value stripped from every
+      line: rename it (`session_cookie_name`, `token_url`).
+    - A context nested deeper than 32 levels, holding more than 5,000 values, or exceeding a
+      shared 256 KiB allowance for keys and retained strings before JSON escaping is now cut,
+      with `"[DEPTH]"` or `"[TRUNCATED]"` where it was cut. Objects are walked before encoding;
+      plain objects expose public stored properties, not purely virtual hooks. Implement
+      `JsonSerializable` when computed properties belong in the log. An array's own entries are
+      counted first, so a large list is cut before a key logged after it.
+      Dates retain their native fields, but custom public stored properties on a date or date
+      subclass are walked under the same limits and redaction rules, never encoded ahead of them.
+    - Collecting configured secrets is limited to 32 map levels, 5,000 entries and 256 KiB of
+      keys and unique secret values. An incomplete or failed scan now omits the caller's
+      message and context, writing `[REDACTED: configured secrets could not be collected safely]`
+      instead for the lifetime of that writer; the `error-log` table and `ErrorHandler`'s
+      `error_log` lines store the same marker instead of the text. Remove recursive or oversized custom config
+      structures if that marker appears; no partial secret list is used for redaction.
+    - Log lines no longer carry raw control or bidirectional characters: a parser sees `\r`,
+      `\n`, `\t`, `\0` or `\uXXXX`, and a CR/LF in a message shows as `\r\n` instead of a
+      space. Invalid UTF-8 becomes `?` in the message and U+FFFD in context. Strings over
+      64 KiB end in `...[truncated N bytes]`.
+    - A failed log write no longer throws out of `Log::*()`. Watch PHP's own error log - the
+      FPM or web server log - for `Logger: cannot write`: nothing else reports a broken log
+      directory.
+18. Database (MySQL).
+    - Statements and logins now give up after `database.read_timeout` (default 300 s, 1 to
+      86400) instead of mysqlnd's 86400 s, and connects after `database.connect_timeout`
+      (default 10 s, 1 to 300). A value outside its range fails at the first database use.
+      Raise `read_timeout` for longer queries. A statement that times out fails with error
+      2006 and may still complete on the server, so an autocommit write may have been applied.
+    - `Db::lock($name, $timeout)` throws if `$timeout` is negative or not below
+      `database.read_timeout`: replace `-1` (wait forever) with a finite timeout.
+    - Inside `Db::transaction()`, a deadlock (1213), exhausted lock table (1206), lock wait
+      timeout (1205), MariaDB 1020 or a lost or killed connection (2006, 2013, 1927, 4031) now
+      rolls the transaction back at once.
+      Catching it and carrying on no longer works: the next statement and the commit throw
+      `Database transaction is aborted`. Retry the whole `Db::transaction()` call instead.
+      Catching a duplicate key (1062) and continuing still works.
+    - After a lost or killed connection (2006, 2013, 1927, or 4031 from MySQL 8.0.24+ after
+      `wait_timeout`), a statement that exceeded
+      `read_timeout` included, the next call opens a new connection instead of failing with 2006
+      for the rest of the process; the old session's variables and temporary tables are gone.
+      Inside a `Db::lock()` callback the lock went with the connection, so every later call in
+      that callback throws `RuntimeException` (`Database connection was lost while Db::lock()
+      held its lock`) instead of a 2006 `PDOException`: a `catch (PDOException)` there no longer
+      catches it. If the release at the end of the callback finds the connection lost,
+      `Db::lock()` no longer throws for it, since the lock went with the session; code that
+      caught that exception after the callback no longer sees it. It logs the warning
+      `Db::lock() found its connection lost at release: exclusivity may have lapsed while the
+      callback ran`, with the lock in its context: the session may have ended while the
+      callback ran, so check the work it guarded, and keep a locked callback's idle time well
+      below `wait_timeout`.
+    - On Unix-like systems, MySQL configuration with `database.hostname = 'localhost'` and a
+      `database.port` other than 0 or 3306 is rejected when database configuration is first
+      read, not necessarily during boot: mysqlnd would use the Unix socket and ignore the
+      port. Use `127.0.0.1` for TCP. On Windows, where mysqlnd connects to localhost over TCP
+      and uses the port, it is accepted.
+    - Float parameters reach the database with every digit, such as `0.30000000000000004`
+      instead of `0.3`. Round explicitly, or pass a string for an exact decimal.
+
+### Good to know
+
+1. `tools/migrate.php <release> <shared> <tag>` applies a release's `migrations/*.sql` once
+   each, in file-name order, after an owner-only dump of the database. It needs the
+   `mariadb`, `mariadb-dump` and `gzip` binaries, supports MariaDB only, reads the database
+   only from the release's own local config file, and creates its `deploy_migration` table
+   on its first run with a migration to apply. A site without a `migrations/` directory is
+   unaffected. It is not vendored with `core/` and `extensions/`: to use it, copy it into your
+   project's `tools/`, and again on every upgrade. Before its first run on a database whose
+   migrations were applied by hand, record them as applied, or they run again. See
+   [Database: Deploy migrations](docs/07-Database.md#deploy-migrations).
+2. Template and asset-version cache entries are now keyed by their file path. Entries
+   written under the old keys are no longer read and expire within their 60-second TTL; no
+   call site changes.
+3. A cache policy in `extensions.security.headers` - `Cache-Control`, `CDN-Cache-Control`,
+   `Cloudflare-CDN-Cache-Control`, `Surrogate-Control`, `Edge-Control`, `X-Accel-Expires`
+   or `Expires` - is no longer sent on a response bound to one visitor or one request: an
+   error other than 404 and 410, a response to a request that used a session or carried
+   credentials such as `Authorization`, one that sets a cookie, and an HTML page given a
+   CSP nonce. Those get `Cache-Control: no-store`, even when they set a public policy
+   themselves; a `no-store` or unqualified `private` they set on the `Response`, with no
+   targeted header beside it, stands. Any other response that sets one of those headers
+   itself, on the `Response` or with `header()`, now keeps it, where the configured value
+   used to replace it. Whatever cache policy is configured, the redirects of `auth` and
+   `oidc-login` now send `no-store`, and so does an error page for a visitor with a session,
+   in place of the session's own cache headers; with the security extension enabled, so
+   does a bound response that set a shareable policy on the `Response` itself. See
+   [Extension: security](docs/22-Extensions-Security.md#caching).
+4. Whether an extension runs is read on every request, so turning one on or off in the
+   local file or an environment variable takes effect without deleting
+   `cache/extensions.php`. Adding or removing an extension folder still needs it deleted.
+5. `Format::escape()` encodes `{` and `}` as `&#123;` and `&#125;`, as `tokens()` does, so
+   text it escaped cannot form a token or block marker in a page; browsers show the same
+   characters. `Translation::text()` also encodes a placeholder its stored text leaves
+   unfilled.
+6. The request body is read when `rawBody()` or `json()` first asks for it, not for every
+   request, and `json()` reads it only when `isJson()` is true. `isJson()` matches
+   `application/json` and `application/*+json` by media type, so
+   `text/plain; x=application/json` and `application/jsonp` no longer count.
+7. `Db::lock()` names are keyed on `database.database` instead of the install path, so every
+   release directory and server of the application takes the same lock. While the old
+   release still runs beside the new one during this upgrade, the two use different names.
+8. A `session.lifetime` longer than `session.gc_maxlifetime` raises it for this application's
+   own garbage collection, and never lowers a longer server value. In a shared save path
+   another collector - another application, or a cron job such as Debian's `sessionclean` -
+   can still remove data sooner: give a long lifetime a `save_path` of its own.
+9. XML responses - `text/xml`, `application/xml` and every `+xml` type, SVG and XHTML among
+   them - get `Content-Security-Policy`, `X-Frame-Options`, `Permissions-Policy` and the
+   cross-origin policies, as HTML pages do; their CSP carries no nonce source, since only an
+   HTML body has `{_csp_nonce}` filled.
+10. A new log file is created under a temporary name and linked into place. Where it cannot
+    be linked - a filesystem without hard links - it is created under its name and narrowed
+    straight after, as before.
+11. `Response::$json` of the HTTP client is decoded on first read; `var_dump()` and
+    `get_object_vars()` of a response no longer show it.
+12. Without APCu, `Cache::once()` keeps its sentinels in the bundle directory as `once-*`
+    files instead of in the system temporary directory, so work it throttles - the daily log
+    prune, error-log's purge - runs once more after the upgrade, and again whenever the
+    `once-*` files are deleted (`rm -f cache/*.php` leaves them). The `cache-once-*` files
+    5.2.0 left in the temporary directory are no
+    longer read and can be deleted. Code that calls `Cache::once()` without `Kernel::boot()`,
+    such as a standalone CLI script, runs its callback unguarded. If your `.gitignore` ignores
+    only `cache/*.php`, add `cache/once-*`, or ignore `cache/` as a whole. Where the web server
+    and CLI jobs share `cache/` through a group, both need umask `002`: under `022` only the
+    account that created a sentinel can write it, so once it expires the other account runs
+    the work on every call until the creator runs it again.
+13. The HTTP client sends a bodiless `POST`, `PUT` or `PATCH` with `Content-Length: 0`; it was
+    sent chunked (`POST`) or without a length (`PUT`, `PATCH`), which some gateways answer
+    with 411 or 400.
+14. SMTP: a reply carrying only its code (`250` CRLF) is a final reply, and `QUIT` and closing
+    the connection after the server accepted the message are best effort, so an accepted
+    message is no longer reported as failed and sent twice by a retry. Connection and TLS
+    handshake failures throw `SMTP_CONNECT_FAILED` and `SMTP_TLS_FAILED` rather than an
+    `ErrorException`. STARTTLS failures now include a bounded, single-line reason after
+    `SMTP_TLS_FAILED: `; replace exact-message comparisons with a prefix check.
+15. Each distinct deprecation - same file, line and message - is logged once per request, and
+    at most 100 per request. The record lasts for the PHP process, so a CLI script or worker
+    logs each one once per run and, after 100 distinct ones, none for the rest of the run.
+    `Kernel::boot()` turns off `display_errors` and trace arguments
+    before it loads the configuration, so a boot that fails early is not printed.
 
 ## 5.1.1 -> 5.2.0
 

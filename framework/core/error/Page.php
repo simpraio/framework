@@ -62,11 +62,11 @@ final class Page
                 'URL' => $url,
             ])
             ->blocks([
-                'is403' => $status === 403,
-                'is404' => $status === 404,
-                'isBug' => $isBug,
-                'isDebug' => $this->debug && $isBug,
-                'isNotDebug' => !$this->debug && $isBug,
+                'Is403' => $status === 403,
+                'Is404' => $status === 404,
+                'IsBug' => $isBug,
+                'IsDebug' => $this->debug && $isBug,
+                'IsNotDebug' => !$this->debug && $isBug,
             ])
             ->render();
     }

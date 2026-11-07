@@ -6,6 +6,10 @@ namespace core\http;
 
 final class Request
 {
+    /** Read on first use: see capture(). */
+    private string $rawBody {
+        get => $this->rawBody ??= (string)file_get_contents('php://input');
+    }
     /** @var array<string, mixed> */
     private array $jsonCache;
     private bool $jsonParsed = false;
@@ -22,6 +26,7 @@ final class Request
      * @param array<string, mixed> $cookies
      * @param array<string, mixed> $files
      * @param array<string, mixed> $server
+     * @param string|null $rawBody null reads php://input on first use
      */
     public function __construct(
         private readonly array $query,
@@ -29,8 +34,11 @@ final class Request
         private readonly array $cookies,
         private readonly array $files,
         private readonly array $server,
-        private readonly string $rawBody,
+        ?string $rawBody,
     ) {
+        if ($rawBody !== null) {
+            $this->rawBody = $rawBody;
+        }
     }
 
     public static function capture(): self
@@ -52,7 +60,9 @@ final class Request
             cookies: $cookies,
             files: $files,
             server: $server,
-            rawBody: (string)file_get_contents('php://input'),
+            // Read when asked for: every request is captured before routing, and a body nothing uses
+            // would otherwise be held in memory for any URL, however large.
+            rawBody: null,
         );
     }
 
@@ -161,8 +171,9 @@ final class Request
             return $this->jsonCache;
         }
 
+        // A body that is not JSON is never read here: json() can be called on any request.
         // Mark the body parsed only after it decodes, so a malformed body is refused the same way on every call.
-        $decoded = RequestPayload::json($this->rawBody, $this->header('Content-Type'));
+        $decoded = $this->isJson() ? RequestPayload::json($this->rawBody(), $this->header('Content-Type')) : [];
 
         $this->jsonCache = $decoded;
         $this->jsonParsed = true;

@@ -6,9 +6,9 @@ namespace core\db;
 
 use Closure;
 use core\config\dto\Database;
-use core\Instance;
+use core\tools\Identifier;
 use PDO;
-use Pdo\Mysql;
+use PDOException;
 use PDOStatement;
 use RuntimeException;
 use Throwable;
@@ -17,11 +17,13 @@ final class Connection
 {
     private ?PDO $pdo = null;
     private readonly TransactionState $transactions;
+    private readonly LockState $locks;
 
     public function __construct(
         private readonly Database $config,
     ) {
-        $this->transactions = new TransactionState();
+        $this->transactions = new TransactionState(mysql: $config->driver === 'mysql');
+        $this->locks = new LockState();
     }
 
     public function ping(): void
@@ -31,6 +33,7 @@ final class Connection
 
     private function pdo(): PDO
     {
+        $this->locks->assertIntact();
         try {
             $this->transactions->assertActive($this->pdo);
         } catch (Throwable $e) {
@@ -45,14 +48,69 @@ final class Connection
     /** @param array<int|string, mixed> $params */
     public function query(string $sql, array $params = []): PDOStatement
     {
-        $pdo = $this->pdo();
-        $stmt = $pdo->prepare($sql);
-        if ($stmt === false) {
-            [$sqlState, $code, $message] = $pdo->errorInfo() + [null, null, null];
-            throw new RuntimeException("Failed to prepare statement [{$sqlState} {$code}]: {$message} | SQL: {$sql}");
+        return $this->run($this->pdo(), $sql, $params);
+    }
+
+    /**
+     * Runs a statement on $pdo without the checks pdo() makes, which releaseLock() must skip.
+     *
+     * @param array<int|string, mixed> $params
+     */
+    private function run(PDO $pdo, string $sql, array $params): PDOStatement
+    {
+        try {
+            $stmt = $pdo->prepare($sql);
+            if ($stmt === false) {
+                [$sqlState, $code, $message] = $pdo->errorInfo() + [null, null, null];
+                throw new RuntimeException("Failed to prepare statement [{$sqlState} {$code}]: {$message} | SQL: {$sql}");
+            }
+            $stmt->execute(array_map(self::bindable(...), $params));
+        } catch (PDOException $e) {
+            $this->failed($pdo, $e);
+            throw $e;
         }
-        $stmt->execute($params);
         return $stmt;
+    }
+
+    /**
+     * Aborts the transaction an error ended, and drops a connection it lost, so that the next call
+     * opens a new one instead of failing on the dead one for the rest of the process. A new
+     * connection would run without the open transaction or the held Db::lock(), so until those
+     * callbacks have unwound every call is refused instead.
+     */
+    private function failed(PDO $pdo, PDOException $e): void
+    {
+        if ($this->transactions->abortOn($e)) {
+            $this->rollBackAborted($pdo);
+        }
+        if ($this->transactions->lostConnection($e)) {
+            $this->pdo = null;
+            $this->locks->connectionLost();
+        }
+    }
+
+    /**
+     * Ends the aborted transaction on the server too, which a lock wait timeout can leave open
+     * with the work done before it.
+     */
+    private function rollBackAborted(PDO $pdo): void
+    {
+        try {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        } catch (Throwable) {
+            $this->pdo = null;
+        }
+    }
+
+    /**
+     * execute() binds a float as a string written with the `precision` ini, 14 digits by default;
+     * var_export() writes the shortest form that reads back as the same float.
+     */
+    private static function bindable(mixed $value): mixed
+    {
+        return is_float($value) ? var_export($value, return: true) : $value;
     }
 
     /**
@@ -91,6 +149,7 @@ final class Connection
      */
     public function lock(string $name, int $timeout, Closure $callback): mixed
     {
+        $this->locks->assertTimeout($timeout, $this->config->readTimeout);
         $name = $this->lockName($name);
 
         if ($this->pdo()->getAttribute(PDO::ATTR_PERSISTENT)) {
@@ -100,16 +159,43 @@ final class Connection
         if ((int)($row['got'] ?? 0) !== 1) {
             throw new RuntimeException("Failed to acquire lock: {$name}");
         }
+        $this->locks->enter();
         try {
             return $callback();
         } finally {
-            $this->execute('DO RELEASE_LOCK(?)', [$name]);
+            $this->locks->leave();
+            $this->releaseLock($name);
         }
     }
 
+    /**
+     * The lock belongs to the session, not to a transaction, so it is released even while an
+     * aborted transaction refuses every other statement. Without a connection it is already gone,
+     * so a release that loses the connection has nothing left to release, only a warning to log.
+     */
+    private function releaseLock(string $name): void
+    {
+        $pdo = $this->pdo;
+        if ($pdo === null) {
+            return;
+        }
+        try {
+            $this->run($pdo, 'DO RELEASE_LOCK(?)', [$name]);
+        } catch (PDOException $e) {
+            if (!$this->transactions->lostConnection($e)) {
+                throw $e;
+            }
+            $this->locks->releaseFoundConnectionLost($name);
+        }
+    }
+
+    /**
+     * GET_LOCK names are server-wide: keyed on the database, so every process of one application takes
+     * the same lock whatever path its code runs from, and another database's application does not.
+     */
     private function lockName(string $name): string
     {
-        return Instance::prefix() . $name;
+        return Identifier::fastHash($this->config->database) . ':' . $name;
     }
 
     /**
@@ -147,9 +233,14 @@ final class Connection
     private function txBegin(): void
     {
         $pdo = $this->pdo();
-        $this->transactions->depth === 0
-            ? $pdo->beginTransaction()
-            : $pdo->exec('SAVEPOINT level_' . $this->transactions->depth);
+        try {
+            $this->transactions->depth === 0
+                ? $pdo->beginTransaction()
+                : $pdo->exec('SAVEPOINT level_' . $this->transactions->depth);
+        } catch (PDOException $e) {
+            $this->failed($pdo, $e);
+            throw $e;
+        }
         $this->transactions->depth++;
     }
 
@@ -189,99 +280,8 @@ final class Connection
         }
     }
 
-    /**
-     * TLS attributes use integer keys, which raw database.options does not preserve.
-     *
-     * @return array<int, mixed>
-     */
-    private function tlsOptions(): array
-    {
-        $ssl = $this->config->ssl;
-        if (!$ssl->enabled()) {
-            return [];
-        }
-
-        $options = [Mysql::ATTR_SSL_VERIFY_SERVER_CERT => $ssl->verifyServerCert];
-
-        if ($ssl->ca !== '') {
-            $options[Mysql::ATTR_SSL_CA] = $ssl->ca;
-        }
-        if ($ssl->cert !== '') {
-            $options[Mysql::ATTR_SSL_CERT] = $ssl->cert;
-            $options[Mysql::ATTR_SSL_KEY] = $ssl->key;
-        }
-
-        return $options;
-    }
-
     private function connect(): PDO
     {
-        return new PDO(
-            dsn: $this->dsn(),
-            username: $this->needsAuth() ? $this->config->username : null,
-            password: $this->needsAuth() ? $this->config->password : null,
-            options: $this->pdoOptions(),
-        );
-    }
-
-    /**
-     * @return array<int, mixed>
-     */
-    private function pdoOptions(): array
-    {
-        $defaults = [
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        ];
-        $initCommandAttr = null;
-
-        if ($this->config->driver === 'mysql') {
-            // Db::update() returns matched rows, including unchanged values.
-            $defaults[Mysql::ATTR_FOUND_ROWS] = true;
-            $defaults += $this->tlsOptions();
-
-            $initCommandAttr = Mysql::ATTR_INIT_COMMAND;
-        }
-
-        /** @var array<int, mixed> $options */
-        $options = $this->config->options + $defaults;
-        if ($initCommandAttr !== null) {
-            // Reserve the init command for the UTC session pin.
-            if (array_key_exists($initCommandAttr, $this->config->options)) {
-                throw new RuntimeException(
-                    'Config: database.options must not set the MySQL init command; it is reserved for '
-                    . "pinning the session to UTC (SET time_zone = '+00:00').",
-                );
-            }
-
-            $options[$initCommandAttr] = "SET time_zone = '+00:00'";
-        }
-        // Last, so database.options cannot weaken either of them.
-        $options[PDO::ATTR_ERRMODE] = PDO::ERRMODE_EXCEPTION;
-        $options[PDO::ATTR_EMULATE_PREPARES] = false;
-
-        return $options;
-    }
-
-    private function dsn(): string
-    {
-        $c = $this->config;
-
-        if ($c->driver === 'sqlite') {
-            return 'sqlite:' . $c->database;
-        }
-
-        return sprintf(
-            '%s:host=%s;port=%d;dbname=%s;charset=%s',
-            $c->driver,
-            $c->hostname,
-            $c->port,
-            $c->database,
-            $c->charset,
-        );
-    }
-
-    private function needsAuth(): bool
-    {
-        return $this->config->driver !== 'sqlite';
+        return (new Connector($this->config))->open();
     }
 }

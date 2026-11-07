@@ -23,12 +23,8 @@ final class Template
         $replace = [];
         foreach ($tokens as $key => $value) {
             $search[] = '{' . $key . '}';
-        // Escape template markers as well as HTML so user values cannot inject blocks or tokens.
-            $replace[] = str_replace(
-                search: ['{', '}'],
-                replace: ['&#123;', '&#125;'],
-                subject: Format::escape($value, trim: false),
-            );
+            // Escapes template markers as well as HTML, so a value cannot form a block or a token.
+            $replace[] = Format::escape($value, trim: false);
         }
         $this->content = str_replace($search, $replace, $this->content);
         return $this;

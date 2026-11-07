@@ -31,6 +31,22 @@ tools/schema/auth.sql
 Create at least one active `auth_group` row and one active `auth_user` row.
 `auth_user.username` can hold either a username or an email address.
 
+## Access Rules
+
+With the shipped `default_policy => 'deny'`, a route without an `auth_access` row is refused,
+and the sign-in page is such a route: a guest redirected to `guest_route` (`/login/`) is refused
+there too and redirected to it again, in a loop. A signed-in user is likewise refused `/logout`.
+Allow both routes for everyone - `user_id = 0` and `group_id = 0` match anyone:
+
+```sql
+INSERT INTO auth_access (path_id, block, user_id, group_id, policy) VALUES
+    ('main/login', '', 0, 0, 'allow'),
+    ('main/logout', '', 0, 0, 'allow');
+```
+
+Every other route your users reach needs an allow row as well, including the page a sign-in
+lands on: `/` is `main/info` with the default route settings.
+
 ## Routes
 
 With the default route convention, these files create:

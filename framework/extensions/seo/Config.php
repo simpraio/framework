@@ -26,7 +26,7 @@ final readonly class Config
         $defaults = Map::section($raw, 'defaults');
 
         return new self(
-            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.seo.enabled', true),
+            enabled: Cast::bool($raw['enabled'] ?? null, 'extensions.seo.enabled', false),
             cacheTtl: max(0, Cast::int($raw['cache_ttl'] ?? null, 'extensions.seo.cache_ttl', 3600)),
             title: Cast::string($defaults['title'] ?? null, 'extensions.seo.defaults.title'),
             description: Cast::string($defaults['description'] ?? null, 'extensions.seo.defaults.description'),

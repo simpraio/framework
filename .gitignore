@@ -5,6 +5,9 @@ framework.local.php
 # Generated bundle files — rebuilt on first request (never commit; can go stale)
 cache/*.php
 framework/cache/*.php
+# Cache::once() sentinels, written there without APCu
+cache/once-*
+framework/cache/once-*
 
 # Runtime logs
 logs/*
