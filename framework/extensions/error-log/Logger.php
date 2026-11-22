@@ -6,10 +6,10 @@ namespace extensions\error_log;
 
 use core\config\Config as CoreConfig;
 use core\db\Db;
+use core\log\NativeLog;
 use core\log\Secrets;
 use core\log\SensitiveKeys;
 use core\Request;
-use RuntimeException;
 use Throwable;
 
 final class Logger
@@ -23,7 +23,8 @@ final class Logger
         $config ??= Config::enabled();
 
         try {
-            $secrets = self::secrets();
+            // Null on an incomplete secret scan: the text is then discarded rather than partially redacted.
+            $secrets = NativeLog::secrets();
             // Inserts and retention use the database's UTC clock.
             Db::insert('error_log', [
                 'exception' => self::ascii($e::class, 191),
@@ -36,7 +37,7 @@ final class Logger
                 'url' => self::truncate(self::scrubUrl(Request::uri(), self::redactKeys($config)), 2048),
             ]);
         } catch (Throwable $sinkFailure) {
-            error_log('errors sink failed: ' . $sinkFailure->getMessage());
+            self::report($sinkFailure);
         }
     }
 
@@ -55,24 +56,13 @@ final class Logger
                 [$retentionDays],
             );
         } catch (Throwable $sinkFailure) {
-            error_log('errors sink failed: ' . $sinkFailure->getMessage());
+            self::report($sinkFailure);
         }
     }
 
-    /**
-     * The configured secret values the log file strips, so a row does not store what the file leaves
-     * out. With no configuration loaded there are none, and the error is stored as it is. Null when the
-     * scan stopped at its limits: what it missed cannot be stripped, so the text is not stored.
-     */
-    private static function secrets(): ?Secrets
+    private static function report(Throwable $sinkFailure): void
     {
-        try {
-            return new Secrets(CoreConfig::secrets());
-        } catch (RuntimeException) {
-            return null;
-        } catch (Throwable) {
-            return new Secrets([]);
-        }
+        error_log('errors sink failed: ' . (NativeLog::line($sinkFailure->getMessage()) ?? Secrets::UNCOLLECTED));
     }
 
     /**
@@ -136,8 +126,7 @@ final class Logger
     }
 
     /**
-     * Matches the name as written and as PHP reads it into $_GET, which cuts it at a NUL or a
-     * "[", drops leading spaces and turns "." and " " into "_": token%00x and token[a] are token.
+     * Check raw and PHP-normalized names: token%00x and token[a] both become token in $_GET.
      *
      * @param array<string, true> $sensitiveKeys from SensitiveKeys::index()
      */

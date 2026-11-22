@@ -19,8 +19,6 @@ final class Redirect
     public static function target(string $base, string|array|null $location): ?string
     {
         if (is_array($location)) {
-            // Several Location headers: the last one wins, as a client reading them in
-            // order would end up believing.
             $key = array_key_last($location);
             $location = $key !== null && is_string($location[$key]) ? $location[$key] : null;
         }

@@ -9,9 +9,7 @@ use InvalidArgumentException;
 final class Response
 {
     /**
-     * The headers a shared cache takes its policy from, lower-cased. A CDN reads a targeted one -
-     * CDN-Cache-Control, Cloudflare-CDN-Cache-Control, Surrogate-Control, Akamai's Edge-Control - and
-     * nginx reads X-Accel-Expires, each ahead of Cache-Control.
+     * Include targeted CDN/proxy policies: they can override an otherwise private Cache-Control.
      */
     public const array SHARED_CACHE_HEADERS = [
         'cache-control',
@@ -70,10 +68,8 @@ final class Response
     }
 
     /**
-     * An error no shared cache may keep, whatever Cache-Control a site sets for its pages: it depends
-     * on the request or on who sent it (400, 401, 403, 429), or it is transient (5xx). A CDN storing
-     * one under the URL would serve one client's refusal to everyone. A 404 or 410 is the same for
-     * every visitor.
+     * Do not share request-specific refusals or transient errors. Only 404/410 may use page cache policy;
+     * visitor-bound responses are excluded separately, regardless of status.
      */
     public static function isUncacheableError(int $status): bool
     {
@@ -81,17 +77,12 @@ final class Response
     }
 
     /**
-     * Whether this request has bound its response to whoever sent it, whatever the status: it used a
-     * session - $_SESSION stays set after the session is closed or destroyed - carried credentials, or
-     * set a cookie outside a Response. A shared cache keeping that response would serve it to others.
+     * Include sessions already closed or destroyed, and cookies emitted outside Response.
      */
     public static function isVisitorBound(): bool
     {
         return ($_SESSION ?? null) !== null
-            // Non-empty only: a server may pass any of these on empty for a request that carried none -
-            // nginx's fastcgi_param without if_not_empty, an unguarded Apache [E=HTTP_AUTHORIZATION:...]
-            // rule, renamed REDIRECT_HTTP_AUTHORIZATION by a front-controller rewrite. A Basic login with
-            // an empty user name still shows in PHP_AUTH_PW.
+            // Servers may populate empty auth fields without credentials; an empty Basic user can still have a password.
             || array_any(
                 ['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'PHP_AUTH_USER', 'PHP_AUTH_PW', 'PHP_AUTH_DIGEST',
                     'REMOTE_USER', 'REDIRECT_REMOTE_USER'],

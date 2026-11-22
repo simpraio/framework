@@ -38,6 +38,7 @@ final class Connection
             $this->transactions->assertActive($this->pdo);
         } catch (Throwable $e) {
             $this->pdo = null;
+            $this->locks->connectionLost();
             $this->transactions->abort();
             throw $e;
         }
@@ -73,10 +74,7 @@ final class Connection
     }
 
     /**
-     * Aborts the transaction an error ended, and drops a connection it lost, so that the next call
-     * opens a new one instead of failing on the dead one for the rest of the process. A new
-     * connection would run without the open transaction or the held Db::lock(), so until those
-     * callbacks have unwound every call is refused instead.
+     * Reconnect only after transaction and lock callbacks unwind; a new session would lose their guarantees.
      */
     private function failed(PDO $pdo, PDOException $e): void
     {
@@ -101,16 +99,28 @@ final class Connection
             }
         } catch (Throwable) {
             $this->pdo = null;
+            $this->locks->connectionLost();
         }
     }
 
     /**
-     * execute() binds a float as a string written with the `precision` ini, 14 digits by default;
-     * var_export() writes the shortest form that reads back as the same float.
+     * execute() binds a float as a string written with the `precision` ini, 14 digits by default.
+     * var_export() at serialize_precision -1 writes the shortest form that reads back as the same
+     * float, with an exponent only below 1e-4 or from 1e17, which MySQL parses as well. It is pinned
+     * for the call because a php.ini value would otherwise round the bound number ('1.23E+6').
      */
     private static function bindable(mixed $value): mixed
     {
-        return is_float($value) ? var_export($value, return: true) : $value;
+        if (!is_float($value)) {
+            return $value;
+        }
+        // ini_set() returns false only for a directive it may not change; serialize_precision is PHP_INI_ALL.
+        $previous = (string)ini_set('serialize_precision', value: '-1');
+        try {
+            return var_export($value, return: true);
+        } finally {
+            ini_set('serialize_precision', $previous);
+        }
     }
 
     /**
@@ -169,9 +179,10 @@ final class Connection
     }
 
     /**
-     * The lock belongs to the session, not to a transaction, so it is released even while an
-     * aborted transaction refuses every other statement. Without a connection it is already gone,
-     * so a release that loses the connection has nothing left to release, only a warning to log.
+     * Session locks must be released even when an aborted transaction refuses other statements.
+     * A lost session already released its lock; warn about the uncertain exclusivity instead.
+     * Any other failure - 2014 from an unbuffered result set still open - discards the connection, so
+     * the session and its lock end once nothing holds the PDO rather than staying held on a reused one.
      */
     private function releaseLock(string $name): void
     {
@@ -182,16 +193,19 @@ final class Connection
         try {
             $this->run($pdo, 'DO RELEASE_LOCK(?)', [$name]);
         } catch (PDOException $e) {
-            if (!$this->transactions->lostConnection($e)) {
-                throw $e;
+            if ($this->transactions->lostConnection($e)) {
+                $this->locks->releaseFoundConnectionLost($name);
+                return;
             }
-            $this->locks->releaseFoundConnectionLost($name);
+            $this->pdo = null;
+            $this->locks->connectionLost();
+            $this->transactions->abort();
+            throw $e;
         }
     }
 
     /**
-     * GET_LOCK names are server-wide: keyed on the database, so every process of one application takes
-     * the same lock whatever path its code runs from, and another database's application does not.
+     * GET_LOCK names are server-wide: namespace by database, not by deployment path.
      */
     private function lockName(string $name): string
     {
@@ -272,8 +286,10 @@ final class Connection
                 $pdo->rollBack();
             }
         } catch (Throwable $e) {
-            // Never reconnect while an enclosing transaction callback can still run.
+            // Never reconnect while an enclosing transaction or Db::lock() callback can still run:
+            // a held lock goes with the discarded connection.
             $this->pdo = null;
+            $this->locks->connectionLost();
             $this->transactions->abort();
 
             throw $e;

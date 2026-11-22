@@ -17,7 +17,7 @@ final class Format
     {
         $datetime = DateTimeImmutable::createFromFormat(
             format: 'U.u',
-            datetime: sprintf('%.6f', $timestamp ?? microtime(true))
+            datetime: sprintf('%.6F', $timestamp ?? microtime(true))
         );
 
         if (!$datetime) {

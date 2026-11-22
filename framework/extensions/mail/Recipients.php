@@ -8,14 +8,18 @@ use InvalidArgumentException;
 
 /**
  * Both transports write these addresses directly into a command or header line, so an address must
- * hold no control character as well as be valid.
+ * hold nothing that ends or reshapes one, as well as be valid.
  */
 final class Recipients
 {
-    /** FILTER_VALIDATE_EMAIL admits a quoted-pair holding any ASCII byte, a line feed included. */
+    /**
+     * The rule of Validator::email(). FILTER_VALIDATE_EMAIL admits a quoted local part, whose quoted-pairs
+     * hold any ASCII byte, a line feed included, and which a relay reading <...> without its quoting takes
+     * for a different address: no control byte, space, quote, backslash or angle bracket passes.
+     */
     public static function isAddress(string $address): bool
     {
-        return filter_var($address, FILTER_VALIDATE_EMAIL) !== false && preg_match('/[\x00-\x1F\x7F]/', $address) !== 1;
+        return preg_match('/^[^\x00-\x20\x7f<>"\\\\]+$/D', $address) === 1 && filter_var($address, FILTER_VALIDATE_EMAIL) !== false;
     }
 
     /**

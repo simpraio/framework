@@ -34,6 +34,10 @@ enables, its deployment and hosts, and its operational rules. This file stays by
 projects, so anything that would differ between two of them belongs in `PRODUCT.md`, never here — a
 single product fact added to this handbook silently breaks the sync for every other project.
 
+Business invariants, design-token values, performance budgets, supported browser/assistive-technology
+combinations, stricter accessibility targets and whether Lighthouse runs or manual assistive-technology
+testing are required belong in `PRODUCT.md` too.
+
 The framework repository itself ships no `PRODUCT.md`; it has no product. Its absence means the
 checkout is the framework rather than a project built on it.
 
@@ -129,6 +133,31 @@ Do not put application-specific logic in `core/`.
 - Inline logic is acceptable when it is clearer than indirection.
 - Static facades are part of the public API and should delegate to simple internal services.
 - Extensions must stay optional.
+
+## PHP Programming
+
+Apply these alongside Core Rules and Change Discipline.
+
+- Use `declare(strict_types=1)`, parameter types and return types. Use PHPDoc for array shapes,
+  generics and constraints PHP cannot express. Annotations must describe actual runtime values,
+  including PHP's conversion of numeric string array keys to integers.
+- Validate data at trust boundaries. Distinguish missing values, `null`, empty strings, zero
+  and `false`; avoid `empty()` where those differences matter. Do not treat a type annotation
+  as runtime input validation.
+- Catch only failures the code can handle meaningfully. Do not silently swallow exceptions or
+  present failed work as a successful empty result. Intentional fallbacks must be explicit and
+  observable where appropriate. Preserve the original exception when wrapping it, and keep
+  secrets out of messages and logs.
+- Bound retries, network waits, recursive traversal and externally controlled collection sizes.
+  Release files, locks and transactions, and restore temporary error handlers or process settings
+  reliably, using `finally` where appropriate.
+- Bind database data values and validate dynamic identifiers. Keep transactions short. Do not
+  automatically retry non-idempotent operations or perform irreversible external actions inside
+  a transaction callback that may be retried.
+- Do not assume static properties reset between jobs in a long-running process. Prevent user,
+  tenant and credential state from leaking between operations; document and test intentional
+  process-local state and its lifetime.
+- Use strict comparisons and explicit conversions rather than loose coercion.
 
 ## Code Comments
 
@@ -280,6 +309,89 @@ Name a block for the fact, not the markup, in `PascalCase`: `IsStatusOk`, `HasRo
 `CanDelete`. A name like `IsStatusClass` is still "which class?", only with a boolean's
 signature.
 
+## HTML, CSS And JavaScript
+
+- Generate semantic, standards-compliant HTML and CSS. Validate rendered HTML, not just
+  template source: tokens, blocks and conditional states must produce valid markup.
+- Build mobile-first: write base styles for small screens, then enhance layouts with
+  `min-width` media queries as content needs more space. Choose breakpoints from the content,
+  not device names. Use flexible layouts that reflow without clipping or unintended horizontal
+  scrolling; genuinely two-dimensional content such as data tables may scroll in its own region.
+- Keep essential content and actions available on mobile. Support touch and keyboard input,
+  never require hover alone, and verify intermediate widths as well as mobile and desktop.
+- Keep markup, selectors and scripts free of unused or duplicated code.
+  Optimize measured problems without sacrificing accessibility or maintainability.
+- CSS nesting is optional, not a formatting requirement. Use shallow native nesting only when
+  it makes related rules clearer; prefer flat selectors when nesting adds complexity or specificity.
+  Use features compatible with the project's supported browsers.
+- Keep selectors component-scoped and low-specificity. Avoid IDs for styling and `!important`
+  unless a specific constraint justifies them. Preserve logical DOM and reading order rather
+  than visually rearranging content into a different sequence.
+- Use JavaScript only when genuinely necessary and no native HTML/CSS equivalent meets the
+  required behavior, accessibility and supported-browser requirements. Do not add JavaScript
+  for interactions, styling or animations that HTML and CSS can provide correctly on their own.
+- Define CSS custom properties for meaningful design tokens: palette colors, typography,
+  spacing scales, shared sizes and other values that should change together. Use the tokens
+  consistently instead of scattering their literal values through rules. Do not create a variable
+  for every number: one-off structural values and intrinsic keywords can remain literal.
+- Use progressive enhancement: essential content, navigation and ordinary form submissions
+  should work without JavaScript where practical. Enhance native behavior instead of replacing
+  it, and keep server-side validation authoritative.
+- Use `textContent` for DOM text updates; never pass untrusted content to `innerHTML`,
+  `insertAdjacentHTML`, inline event handlers or generated scripts.
+- Keep scripts and styles in external assets by default, consistent with the project's CSP.
+  Avoid inline event handlers, `eval()` and `new Function()`. Do not weaken CSP to accommodate
+  an implementation.
+- Implement applicable loading, empty, error, success, disabled and focus states. Prevent
+  duplicate submissions and announce meaningful asynchronous results accessibly. Client-side
+  prevention does not replace server-side validation or idempotency where needed.
+- Size images appropriately, provide responsive sources where useful and reserve media dimensions
+  to prevent layout shifts. Lazy-load below-the-fold media, not the primary above-the-fold image.
+  Load scripts without unnecessarily blocking rendering.
+
+### Accessibility
+
+- WCAG 2.2 Level AA is the framework-wide floor: meet all applicable Level A and AA success
+  criteria on complete pages and user flows, not just isolated components. `PRODUCT.md` may set
+  a stricter target, never a lower one. See [WCAG 2.2](https://www.w3.org/TR/WCAG22/).
+- Prefer native semantic elements with their built-in behavior. Add WAI-ARIA only where needed;
+  valid roles, accessible names, states and relationships must match the actual interface.
+  ARIA does not supply keyboard behavior. Follow the
+  [ARIA Authoring Practices Guide](https://www.w3.org/WAI/ARIA/apg/practices/read-me-first/).
+- Make every interaction keyboard-operable, with logical focus order, visible unobscured focus,
+  no keyboard traps and appropriate focus management when dialogs open or close.
+- Provide meaningful headings and landmarks, page language and titles, text alternatives,
+  persistent form labels, associated instructions and errors, and accessible status updates.
+  Keep dynamic ARIA states synchronized; never hide focusable content from assistive technology.
+- Meet contrast, zoom/reflow and target-size requirements. Do not convey meaning through color
+  alone. Respect reduced-motion preferences and provide accessible alternatives to media.
+
+### Validation And Lighthouse
+
+- Validate changed rendered pages and styles with the W3C HTML checker and CSS validator, or
+  local equivalents. Resolve errors and review warnings. Report validator limitations for
+  supported modern features rather than claiming an unverified pass.
+- Check representative desktop and mobile layouts and interaction states, including forms,
+  errors and dialogs. Combine automated accessibility checks with manual keyboard, focus and
+  zoom/reflow checks. Manual screen-reader and other assistive-technology testing, on the
+  browser/assistive-technology combinations `PRODUCT.md` lists, is required where `PRODUCT.md`
+  asks for it and recommended otherwise.
+- Lighthouse runs are required where `PRODUCT.md` asks for them and recommended otherwise: run
+  them against representative routes in a production-like local or staging build, using both
+  mobile and desktop presets. Aim for 100 in Performance, Accessibility, Best Practices and, for
+  indexable public pages, SEO.
+- Record the checks run and their results in the commit message: the tested URLs/states,
+  Lighthouse and browser versions, presets/throttling, actual category scores and remaining
+  findings. Repeat performance runs under consistent conditions and report a representative
+  result, not only the best run. If a check cannot run, say why in the commit message.
+- Never weaken security, remove intentional authentication or `noindex`, hide content, disable
+  audits or remove useful functionality to raise a score. Document justified limitations.
+- Do not upload private pages, credentials or personal data to online validators or remote
+  auditing services. Use local tools or sanitized fixtures for sensitive content.
+- A Lighthouse score of 100 is not proof of WCAG conformance. Do not claim "100% accessible",
+  standards validation or a Lighthouse score without the corresponding evidence; report what
+  was tested and any gaps. The manual keyboard, focus and zoom/reflow checks remain required.
+
 ## Extensions
 
 Extensions should be optional and explicit.
@@ -362,6 +474,7 @@ the next section.
 
 ```sh
 php tests/run_all.php                 # the generic suite: core/, extensions/, integration/
+php tests/run_all.php --jobs=2        # the same, overlapping suites marked @parallel-safe
 php tests/core/router.php             # one suite
 mago lint --minimum-report-level warning
 mago analyze --minimum-report-level warning --reporting-format short
@@ -376,6 +489,12 @@ php tests/security_probe.php --base-url=https://your-app.example --csrf-path=/lo
 
 `run_all.php` exits non-zero on any failure and names what it did not run. A suite that
 skipped everything is reported as a skip, never as a pass.
+
+The default runs one suite at a time. With `--jobs=2`, every unmarked suite still runs alone first,
+then suites whose source carries a `// @parallel-safe: <why>` comment run two at a time. Mark a
+suite only after checking it shares nothing with another: its files under its own `testDirectory()`,
+ports kept open from reservation to use, only process-local `ini_set()`, no environment variable,
+working directory, database table or fixed path of its own. When in doubt, leave it unmarked.
 
 ### Risk tiers
 

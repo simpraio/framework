@@ -5,7 +5,7 @@
 There is no route table. The URL maps directly to a module and controller by convention:
 
 ```
-/{module}/{controller}/{id - }
+/{module}/{controller}/{id?}
 ```
 
 The router strips trailing slashes, normalizes segments to lowercase, and resolves based on segment count:
@@ -15,7 +15,7 @@ The router strips trailing slashes, normalizes segments to lowercase, and resolv
 /docs                 -> defaultModule / docs
 /docs/start           -> docs / start
 /blog/post/42         -> blog / post,  id = "42"
-/a/b/c/d              -> 404  (more than 3 segments after language)
+/a/b/c/d              -> 404  (more than 3 segments after language, unless an alias matches)
 ```
 
 The default module and controller are set in `config/app.php` under `route.default_module` and `route.default_controller`. Both default to `main` and `info` respectively.
@@ -129,6 +129,6 @@ Aliases::uri($route);   // returns '/cs/spolecnost/o-nas' or null if no alias
 ## Security Notes
 
 - **Segment whitelist** - the character whitelist (`a-z 0-9 -`) blocks path traversal, null bytes, encoded slashes, and all other unsafe inputs before any filesystem path is constructed. No sanitization step is needed downstream.
-- **Depth limit** - more than 3 segments (after an optional language prefix) returns `404`. This caps the attack surface for path-based probing.
+- **Convention depth limit** - without a matching alias, more than 3 segments (after an optional language prefix) returns `404`. Aliases are resolved first and may contain more segments; every segment still passes the whitelist.
 - **Host header validation** - when `allowed_hosts` is set in `config/app.php`, the framework returns `400` for requests with a Host header not in the list. Set this in production to prevent host header injection. An empty list disables the check (development default).
 - **Template paths** - the view loader validates template names independently. Dots are rejected, making directory traversal sequences like `../` impossible. Underscores are allowed (used for internal templates like `_base` that are never reachable via URL). A controller cannot load a template outside `templates/`.

@@ -6,15 +6,7 @@ namespace core\http;
 
 use InvalidArgumentException;
 
-/**
- * The one place a URL or a path is taken apart or judged:
- *
- * - path()           the part of a request target, or any string, before its query or fragment
- * - isLocal()        a finished path on this site, safe to send as a Location
- * - configuredPath() a route from configuration, turned into a path on this site
- * - parse()          an absolute http(s) URL this framework is about to connect to or trust
- * - host()           the host a Host header names
- */
+/** The only place URLs and paths are parsed or judged: a separate parse_url() can read a URL differently from the code that connects. */
 final class Url
 {
     /** Browsers may strip or reinterpret these bytes before resolving a Location. */
@@ -42,8 +34,8 @@ final class Url
     }
 
     /**
-     * A leading-slash path stays exact; a bare route name becomes /name/. Browser-equivalent
-     * slashes are normalised and control characters refused, so the result cannot leave the site.
+     * A bare route name becomes /name/. Normalize outer slashes and refuse control characters
+     * so browser-equivalent slashes cannot turn a configured path into an external redirect.
      *
      * @throws InvalidArgumentException with $errorCode when the value holds a control character
      */

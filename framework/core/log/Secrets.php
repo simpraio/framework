@@ -7,16 +7,8 @@ namespace core\log;
 use SensitiveParameter;
 
 /**
- * Replaces known secret values with [REDACTED] in logged text. Redacting by key cannot reach a secret
- * inside free text - an exception message carrying a DSN, a URL with a credential in its query.
- *
- * A value shorter than MIN_BYTES is left alone: it would match ordinary text and corrupt unrelated
- * lines. Each kept value is also matched as it is spelt inside a URL or a JSON string.
- *
- * All forms are matched together, in text order, and occurrences that overlap or touch become a single
- * [REDACTED]. Replacing one form after another - str_replace(), or strtr(), which
- * never matches inside text it has already replaced - leaves behind the part of a secret that overlaps
- * one replaced before it.
+ * Short values are excluded to avoid redacting ordinary text.
+ * Match all spellings together and merge overlaps; sequential replacements can leave secret fragments.
  */
 final readonly class Secrets
 {
@@ -41,8 +33,7 @@ final readonly class Secrets
     }
 
     /**
-     * Walks the text once, holding only the next occurrence of each form, so memory does not grow with
-     * the number of matches: a known value repeated through megabytes of logged text must not exhaust it.
+     * Keep only the next occurrence per spelling so memory does not grow with the number of matches.
      */
     public function strip(string $text): string
     {
@@ -64,8 +55,7 @@ final readonly class Secrets
     }
 
     /**
-     * The end of the run of occurrences starting at $start, each overlapping or touching the one before,
-     * with $next moved past it. An occurrence lying wholly inside the run so far is skipped, not visited.
+     * Skip contained matches; only occurrences extending the redacted span need visiting.
      *
      * @param array<int, int> $next
      */
@@ -93,17 +83,17 @@ final readonly class Secrets
         return $end;
     }
 
-    /** @return array{count: int} the number of forms matched, never the values */
+    /** @return array{count: int} configured spellings, never secret values */
     public function __debugInfo(): array
     {
         return ['count' => count($this->forms)];
     }
 
-    /** @return list<string> the value as it is, URL-encoded both ways, and escaped as a JSON string */
+    /** @return list<string> literal, URL and JSON spellings */
     private static function spellings(#[SensitiveParameter] string $value): array
     {
         $spellings = [$value, rawurlencode($value), urlencode($value)];
-        foreach ([0, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE] as $flags) {
+        foreach ([0, JSON_UNESCAPED_SLASHES, JSON_UNESCAPED_UNICODE, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE] as $flags) {
             $encoded = json_encode($value, $flags | JSON_INVALID_UTF8_SUBSTITUTE);
             if ($encoded !== false) {
                 $spellings[] = substr($encoded, offset: 1, length: -1);

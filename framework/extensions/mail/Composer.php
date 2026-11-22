@@ -24,6 +24,10 @@ final class Composer
         'content-transfer-encoding',
         'date',
         'message-id',
+        'sender',
+        'return-path',
+        'received',
+        'content-disposition',
     ];
 
     public static function build(Message $message, Config $config): Envelope
@@ -31,6 +35,8 @@ final class Composer
         if ($message->recipients === []) {
             throw new InvalidArgumentException('NO_RECIPIENT');
         }
+
+        Limits::assertWithin($message, $config);
 
         // Message-ID must derive from the validated sender to prevent header injection.
         $fromEmail = self::resolveFromEmail($message->fromEmail, $config->fromEmail);
@@ -43,7 +49,7 @@ final class Composer
             ...self::customHeaders($message->customHeaders),
             'From' => Header::from($message->fromName ?? $config->fromName, $fromEmail),
             'Date' => new DateTimeImmutable()->format(DATE_RFC2822),
-            'Message-ID' => self::messageId($fromEmail),
+            'Message-ID' => self::messageId($message->messageId, $fromEmail),
             'MIME-Version' => '1.0',
             ...$contentHeaders,
         ];
@@ -161,17 +167,22 @@ final class Composer
     }
 
     /**
+     * @param string|null $custom a chosen id, checked by Message::messageId(), the only way to set it
      * @param string $fromEmail a validated address; its domain is inserted into a header.
      */
-    private static function messageId(string $fromEmail): string
+    private static function messageId(?string $custom, string $fromEmail): string
     {
+        if ($custom !== null) {
+            return '<' . $custom . '>';
+        }
+
         $domain = substr(string: $fromEmail, offset: (int)strrpos(haystack: $fromEmail, needle: '@') + 1);
 
         return sprintf('<%s@%s>', bin2hex(random_bytes(16)), $domain);
     }
 
     /**
-     * @param array<string, string> $headers
+     * @param array<int|string, string> $headers canonical integer names become int keys
      * @return array<string, string>
      */
     private static function customHeaders(array $headers): array
@@ -180,7 +191,7 @@ final class Composer
 
         foreach ($headers as $name => $value) {
             // Validate before trimming so edge-positioned controls cannot disappear.
-            $name = trim($name, characters: " \t");
+            $name = trim((string)$name, characters: " \t");
 
             if (
                 $name === ''

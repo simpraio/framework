@@ -31,7 +31,7 @@ final readonly class Log
             level: Cast::oneOf($raw['level'] ?? null, 'log.level', self::LEVELS, 'warning'),
             rotateDaily: Cast::bool($raw['rotate_daily'] ?? null, 'log.rotate_daily', true),
             retentionDays: Cast::int($raw['retention_days'] ?? null, 'log.retention_days', 14),
-            redactKeys: Map::lowerStringList($raw, 'redact_keys'),
+            redactKeys: Map::lowerStringList($raw, 'redact_keys', 'log.redact_keys'),
             redactSecrets: Cast::bool($raw['redact_secrets'] ?? null, 'log.redact_secrets', true),
         );
     }

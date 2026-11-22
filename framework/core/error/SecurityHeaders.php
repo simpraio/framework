@@ -7,6 +7,8 @@ namespace core\error;
 use core\config\Config;
 use core\http\HeaderField;
 use core\http\Response;
+use core\log\NativeLog;
+use core\log\Secrets;
 use Throwable;
 
 /**
@@ -63,7 +65,10 @@ final class SecurityHeaders
             }
         } catch (Throwable $headerFailure) {
             if ($debug) {
-                error_log('ErrorHandler: security headers skipped: ' . $headerFailure->getMessage());
+                error_log(
+                    'ErrorHandler: security headers skipped: '
+                    . (NativeLog::line($headerFailure->getMessage()) ?? Secrets::UNCOLLECTED),
+                );
             }
         }
     }

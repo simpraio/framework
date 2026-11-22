@@ -43,7 +43,7 @@ Cache::once('maintenance.purge', function (): void {
 }, ttl: 86400);
 ```
 
-`once()` returns `true` if the callback ran, `false` if it was skipped (already ran within the TTL). It suppresses repeats on one host and is not an exactly-once guarantee: hosts do not coordinate, a process that cannot take the lock skips - with APCu after waiting up to `$waitSeconds`, 0 by default - and without a bundle directory, or where its sentinel cannot be opened, the callback runs unguarded. Use `Db::lock()` for work that must never run twice. A `$ttl` of `0` runs it once with no expiry. The error-log extension uses this pattern to throttle its purge queries. Use a fixed key: without APCu each key is a file in the bundle directory, and nothing removes it.
+`once()` returns `true` if the callback ran, `false` if it was skipped (already ran within the TTL). It suppresses repeats on one host and is not an exactly-once guarantee: hosts do not coordinate, a process that cannot take the lock skips - with APCu after waiting up to `$waitSeconds`, 0 by default - and without a bundle directory, or where its sentinel cannot be opened, the callback runs unguarded. `Db::lock()` provides mutual exclusion, not deduplication: sequential callers each run its callback. Prevent repeats with a durable completion check or idempotency constraint; see [Advisory locks](07-Database.md#advisory-locks) for connection-loss limits. A `$ttl` of `0` runs it once with no expiry. The error-log extension uses this pattern to throttle its purge queries. Use a fixed key: without APCu each key is a file in the bundle directory, and nothing removes it.
 
 ## Atomic counter
 

@@ -12,7 +12,13 @@ return [
                 // A GUID pins one tenant; common/organizations/consumers intentionally accept more.
                 'tenant' => '',
                 'client_id' => '',
+                // Which credential authenticates the app: 'secret', or 'certificate' (a certificate and
+                // its private RSA key (2048+ bits), absolute PEM paths; requires PHP 8.5+ and OpenSSL 3.1+ for PS256).
+                // Both may be configured; only the selected one is used, never as a fallback.
+                'client_credential' => 'secret',
                 'client_secret' => '',
+                'client_certificate' => '',
+                'client_private_key' => '',
                 'redirect_uri' => '',
                 'scopes' => ['openid', 'profile', 'email'],
                 'session_key' => 'microsoft.user',

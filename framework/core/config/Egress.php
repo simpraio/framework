@@ -26,13 +26,17 @@ final readonly class Egress
     ) {
     }
 
-    /** @param array<string, mixed> $egress */
+    /** @param array<string, mixed> $egress the extensions.http-client.egress section, which config errors name */
     public static function fromArray(array $egress): self
     {
         return new self(
-            enabled: Cast::bool($egress['enabled'] ?? null, 'egress.enabled', true),
-            allowlist: Map::lowerStringList($egress, 'allowlist'),
-            blockPrivateIps: Cast::bool($egress['block_private_ips'] ?? null, 'egress.block_private_ips', true),
+            enabled: Cast::bool($egress['enabled'] ?? null, 'extensions.http-client.egress.enabled', true),
+            allowlist: Map::lowerStringList($egress, 'allowlist', 'extensions.http-client.egress.allowlist'),
+            blockPrivateIps: Cast::bool(
+                $egress['block_private_ips'] ?? null,
+                'extensions.http-client.egress.block_private_ips',
+                true,
+            ),
         );
     }
 
@@ -105,7 +109,8 @@ final readonly class Egress
         }
 
         $ips = array_values($ips);
-        $cache[$host] = [$now + self::RESOLVE_CACHE_TTL, $ips];
+        // Timed from the answer: a lookup slower than the TTL would otherwise be cached already expired.
+        $cache[$host] = [time() + self::RESOLVE_CACHE_TTL, $ips];
         return $ips;
     }
 

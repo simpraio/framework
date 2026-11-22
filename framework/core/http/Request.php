@@ -6,7 +6,6 @@ namespace core\http;
 
 final class Request
 {
-    /** Read on first use: see capture(). */
     private string $rawBody {
         get => $this->rawBody ??= (string)file_get_contents('php://input');
     }
@@ -60,8 +59,7 @@ final class Request
             cookies: $cookies,
             files: $files,
             server: $server,
-            // Read when asked for: every request is captured before routing, and a body nothing uses
-            // would otherwise be held in memory for any URL, however large.
+            // Capture precedes routing; defer allocation of bodies that no handler needs.
             rawBody: null,
         );
     }

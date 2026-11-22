@@ -77,7 +77,7 @@ false     // hide
 'hide'    // hide
 ```
 
-Blocks work across multiple lines - the pattern matches newlines. Blocks with different names are independent and can be nested. Two blocks with the same name cannot be reliably nested.
+Blocks work across multiple lines: an opening marker pairs with the first closing marker after it, found by plain string search rather than a regular expression, so a block of any size is hidden or shown whole. Blocks with different names are independent and can be nested. Two blocks with the same name cannot be reliably nested.
 
 ## Repeating Rows
 
@@ -151,7 +151,10 @@ Partials are just templates - same file format, same token and block API, no spe
 ->render(): string
 ```
 
-`tokens()`, `rawTokens()`, and `blocks()` return `$this` and can be chained in any order. `renderRows()` and `render()` return strings and terminate the chain.
+`tokens()`, `rawTokens()`, and `blocks()` return `$this` and execute immediately. Order matters when a
+raw replacement introduces markers: insert the fragment before filling its tokens or deciding its
+blocks. A later contributor cannot replace a marker an earlier call already consumed.
+`renderRows()` and `render()` return strings and terminate the chain.
 
 ## Formatting Helpers
 

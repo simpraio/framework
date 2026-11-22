@@ -15,6 +15,9 @@ final readonly class Config implements JsonSerializable
 {
     use RedactsSecrets;
 
+    /** Labels that are all digits read as an IPv4 address, which RFC 5321 accepts only as a bracketed literal. */
+    private const string HOSTNAME = '/^(?=.{1,253}$)(?![0-9.]+$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$/D';
+
     public function __construct(
         public string $host,
         public int $port,
@@ -24,6 +27,7 @@ final readonly class Config implements JsonSerializable
         #[SensitiveParameter]
         public string $password,
         public int $timeout,
+        public string $ehloHost = '',
     ) {
     }
 
@@ -43,6 +47,14 @@ final readonly class Config implements JsonSerializable
             throw new RuntimeException('SMTP_HOST_MISSING');
         }
 
+        $ehloHost = Cast::trimmedString($smtp['ehlo_host'] ?? null, 'extensions.mail.smtp.ehlo_host');
+
+        if ($ehloHost !== '' && !self::isDomain($ehloHost)) {
+            throw new RuntimeException(
+                "Config: 'extensions.mail.smtp.ehlo_host' must be a hostname or a bracketed address literal.",
+            );
+        }
+
         return new self(
             host: $host,
             port: max(1, Cast::int($smtp['port'] ?? null, 'extensions.mail.smtp.port', 587)),
@@ -51,6 +63,7 @@ final readonly class Config implements JsonSerializable
             username: Cast::trimmedString($smtp['username'] ?? null, 'extensions.mail.smtp.username'),
             password: Cast::string($smtp['password'] ?? null, 'extensions.mail.smtp.password'),
             timeout: max(1, Cast::int($smtp['timeout'] ?? null, 'extensions.mail.smtp.timeout', 30)),
+            ehloHost: $ehloHost,
         );
     }
 
@@ -66,5 +79,31 @@ final readonly class Config implements JsonSerializable
     public function address(): string
     {
         return ($this->encryption === SmtpEncryption::Ssl ? 'ssl://' : '') . $this->host . ':' . $this->port;
+    }
+
+    /** The name EHLO and HELO announce: the configured one, else the machine name when a relay can read it. */
+    public function resolvedEhloHost(): string
+    {
+        if ($this->ehloHost !== '') {
+            return $this->ehloHost;
+        }
+
+        $machine = gethostname();
+
+        return is_string($machine) && preg_match(self::HOSTNAME, $machine) === 1 ? $machine : 'localhost';
+    }
+
+    private static function isDomain(string $value): bool
+    {
+        if (preg_match(self::HOSTNAME, $value) === 1) {
+            return true;
+        }
+
+        $match = [];
+        if (preg_match('/^\[(IPv6:)?([0-9A-Fa-f:.]+)\]$/Di', $value, $match) !== 1) {
+            return false;
+        }
+
+        return filter_var($match[2], FILTER_VALIDATE_IP, $match[1] === '' ? FILTER_FLAG_IPV4 : FILTER_FLAG_IPV6) !== false;
     }
 }

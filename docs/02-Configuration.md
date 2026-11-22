@@ -10,21 +10,32 @@ Configuration is built from three layers merged in order - each layer overrides 
 3. environment SIMPRA_* variables  -  always read live
 ```
 
-Layers are deep-merged: nested maps (associative arrays) merge recursively, so overriding one key inside a section does not wipe the rest of that section. **Lists are replaced wholesale, not merged by index** - a later layer's list is authoritative, so a local or environment layer can shrink or clear a default list (e.g. an egress allowlist) rather than only overwriting it element-by-element. `log.redact_keys` is the exception in effect: it only adds to built-in keys that no layer can remove (see [Log Settings](#log-settings)).
+Layers are deep-merged: nested maps (associative arrays) merge recursively, so overriding one key inside a section does not wipe the rest of that section. **Lists are replaced wholesale, not merged by index** - a later layer's list is authoritative, so a local layer can shrink or clear a default list (e.g. an egress allowlist) rather than only overwriting it element-by-element. The built-in environment mapping below exposes scalar settings only. `log.redact_keys` is the exception in effect: it only adds to built-in keys that no layer can remove (see [Log Settings](#log-settings)).
 
 **`[]` clears a list but never a map.** PHP cannot tell an empty list from an empty map, so the earlier layer decides: over a list (`'allowed_hosts' => []`, `'allowlist' => []`) it clears the list; over a map (`'session' => []`, `'extensions' => ['security' => []]`) it changes nothing, so a placeholder left in a local file cannot wipe the committed settings of that section. A map is changed key by key only: replacing one with a scalar, `null` or a list - `'session' => null`, `'security' => false` - stops the boot with a config error naming the key (never the value). To turn something off, set its own key: `'enabled' => false` for an extension, `''` for a single security header.
 
-**What is cached:** all `config/*.php` files are bundled into `cache/config.php` on the first request. Subsequent requests load the bundle directly. **Local config and environment variables are never cached** - they are read fresh on every request so credentials and per-environment settings are never baked into committed files.
+**What is cached:** the default `config/*.php` files described below are bundled into `cache/config.php` on the first request. Subsequent requests load the bundle directly. **Local config and environment variables are never cached** - they are read fresh on every request so credentials and per-environment settings are never baked into committed files.
 
 **Local file lookup:** the framework checks `config/framework.local.php` first, then `framework.local.php`. The first match wins. Add both paths to `.gitignore`.
 
+**The default files are listed, never matched against a path pattern.** `[`, `]`, `*` and `?` in the install path are ordinary characters, so a site under `/srv/site[2]/` reads its `config/*.php`, finds its extension folders and prunes its `logs/*.log` like any other. Every install ships `config/app.php`, so a `config/` directory that cannot be listed, or that holds no default file, stops the boot with a config error naming the directory, instead of building an empty bundle that stays until deleted. Defaults are regular files whose names end in `.php` and do not start with a dot, except `framework.local.php` and `framework.local.<anything>.php`, such as `framework.local.example.php`. Other matching names, `framework.local-old.php` and `framework.localbak.php` included, are compiled into the bundle, so never leave local credentials under such a name. An `extensions/` directory that exists but cannot be listed stops it too; one that does not exist means no extensions.
+
+**Lists of names are read strictly.** `log.redact_keys`, `language.available`, `extensions.error-log.redact_keys` and `extensions.http-client.egress.allowlist` must each be an array of strings, `[]`, `null` or absent, and `extensions.security.headers` a map of header name to string value. A scalar (`'redact_keys' => 'session_id'`, `'available' => 'en,de'`), a list entry that is not a string (a number, `true`, `null`, an array) or a header value that is not a string (`false`, a number, `null`) refuses the request with a config error naming the key and the type found, never the value, instead of being read as `[]` or dropped. Language and log settings are validated during config initialization; these extension settings are validated when extensions load, even for a disabled extension. List entries are trimmed, so `' api.example.com '` matches that host, and a blank entry is dropped. Header values are not trimmed; `''` drops a header.
+
 **Every layer file returns a map of sections:** `return ['project' => [...], 'session' => [...]];`. A file that returns anything else - a list, a string, nothing because the `return` is missing - stops the boot with a config error naming the file, instead of being dropped or merged under a numeric key while every setting in it silently falls back to its default. An empty `return [];` is a valid local file with no overrides.
+
+**A PHP warning or notice raised while a layer file runs stops the boot** with an `ErrorException` naming the file and the line, never PHP's own text, which can quote a value. The configuration is read before the framework's error handler exists, so `'ca' => $caPath` with `$caPath` undefined used to be logged and the boot went on with `null`, which the TLS settings read as no TLS. The layer runs with every warning reported, whatever php.ini's `error_reporting` masks; a deprecation php.ini hides stays hidden. A deprecation does not stop the boot, and neither does a warning the layer silences itself with `@`.
 
 **A misspelt local key stops the boot.** Nothing reads a key the framework does not know, so `project.allowed_host` would leave the Host check off and `extensions.csrf.enabeld` would leave CSRF off, silently. A local key that is within one edit of a declared key at the same place - two for a key of eight characters or more; letter case is ignored, and two swapped neighbours count as one edit - stops the boot with one config error naming every such key and the key it resembles, never a value. Declared means set by a committed `config/*.php` file, plus the `database` keys, which have no committed file. A key that resembles none is not judged, so credentials and a product's own settings can stay out of committed config. Nor is a key shaped unlike the one it resembles: a map is judged against a declared map only when the two share at least one key, so a product's local-only `blog`, `routes` or `sessions` section boots beside `log`, `route` and `session`, while `'sesion' => ['secure' => false]` is refused. Where the keys are not settings - header names, the maps inside a product's own section, and a declared empty array such as `database.options` - any map near the key is judged. A scalar or a list is judged only against a key that is not a map, and `[]` near a map is not judged, since it would change nothing even spelt right. The framework's own sections (`project`, `route`, `language`, `session`, `log`, `database`, `extensions`) are compared at every depth, except the names under `extensions.security.headers`, which are yours to add; a product's own section is compared at its own keys only. If a flagged key is meant, declare it in a committed config file. The check runs against the bundled defaults, so clear the bundle after changing `config/*.php` (see [Bundle Directory](#bundle-directory)). Environment variables map to fixed keys and are not checked.
 
 Spelling checks compare string keys only, never integer option identifiers or list indexes.
-This does not change which keys a configuration DTO accepts: `database.options` still passes
-only string keys through to PDO.
+This does not change which keys a configuration DTO accepts: `database.options` takes string keys
+only, and refuses an integer one at the first database use.
+
+Custom configuration code using `core\config\Map::stringList()`, `lowerStringList()` or `stringMap()`
+must supply the full key path as the third argument, for example
+`Map::stringList($raw, 'names', 'extensions.example.names')`. This path identifies invalid input in
+the exception; the old two-argument call is no longer supported.
 
 ## Project Settings
 
@@ -129,13 +140,26 @@ The headers are suffixes so that `$_SERVER`'s names match as well as the header'
 
 `redact_keys` **adds** to the built-in keys; no configuration removes one. `private_key_bits`, `token_ttl`, `cookie_consent` and `cache_key` end in none of the suffixes and stay visible. Redaction goes by key name only: a header list of name/value pairs (`[['name' => 'Authorization', 'value' => '...']]`) or raw header lines (`['Authorization: Bearer ...']`) keeps the secret under a key that names nothing, so log a header map keyed by header name, or leave the header out. Use `#[\SensitiveParameter]` on method parameters holding secrets to keep them out of traces. `redact_secrets` masks secret-bearing config DTO fields when dumped through `var_dump()` or `json_encode()`.
 
-Configured secret **values** are also stripped wherever they turn up in free text, which key names cannot reach: an exception message carrying a DSN, a URL with a credential in its query. Every string the configuration holds under a key the rules above name - from any layer, the environment included - is replaced with `[REDACTED]` in the message and in every context string, the stack trace the error handler logs among them. That covers `database.password` (or `SIMPRA_DB_PASS`), `extensions.mail.smtp.password`, each OIDC `client_secret`, a `crypt_key` a project configures, a value under a `redact_keys` name, and every string of a list or map kept under such a key (`api_tokens => [...]`). Each value is matched as written, URL-encoded, and escaped as inside a JSON string, and before the 64 KiB cut, so a secret straddling it leaves no prefix behind. A value shorter than 8 bytes is not stripped: it would match ordinary text and corrupt unrelated lines, so a real secret should be longer. The rule goes by the key, never by what the value is: a project key that ends in one of the suffixes or is listed in `redact_keys` but holds something public of 8 bytes or more - a `session_cookie` holding the cookie's name, a `csrf_token` holding a form field name, an endpoint map's `token` or `authorization` URL - has that value replaced with `[REDACTED]` wherever it appears in every log line, URLs and messages that merely mention it included. Name such keys for what they hold (`session_cookie_name`, `token_url`, `authorization_endpoint`), none of which ends in a suffix. The values are collected once per request, when the first line is written. Only values the configuration holds are known - a secret read from a vault, a database row or a request is not, so keep it out of messages yourself. Context keys are stripped like context strings: a key that is or contains a secret is written with `[REDACTED]` in its place, and a key that then has the same name as one already written in that array gets `#2` appended (`#3` and on, in the order logged), so neither value is lost. The `error-log` extension strips the same values from the message and trace it stores, and the error handler from what it reports to PHP's `error_log` when writing the log itself fails.
+Configured secret **values** are also stripped wherever they turn up in free text, which key names cannot reach: an exception message carrying a DSN, a URL with a credential in its query. Every string the configuration holds under a key the rules above name - from any layer, the environment included - is replaced with `[REDACTED]` in the message and in every context string, the stack trace the error handler logs among them. That covers `database.password` (or `SIMPRA_DB_PASS`), `extensions.mail.smtp.password`, each OIDC `client_secret`, a `crypt_key` a project configures, a value under a `redact_keys` name, and every string of a list or map kept under such a key (`api_tokens => [...]`). A number counts only directly under such a key, written as PHP casts it to a string (`'password' => 12345678` strips `12345678`); a number inside a list or map kept under one (`'cookie' => ['lifetime' => 3600]`) is a setting and is not stripped. Each value is matched as written, URL-encoded, and as PHP's `json_encode()` writes it inside a JSON string - only those spellings, see below - and before the 64 KiB cut, so a secret straddling it leaves no prefix behind. A value shorter than 8 bytes is not stripped: it would match ordinary text and corrupt unrelated lines, so a real secret should be longer. The rule goes by the key, never by what the value is: a project key that ends in one of the suffixes or is listed in `redact_keys` but holds something public of 8 bytes or more - a `session_cookie` holding the cookie's name, a `csrf_token` holding a form field name, an endpoint map's `token` or `authorization` URL - has that value replaced with `[REDACTED]` wherever it appears in every log line, URLs and messages that merely mention it included. Name such keys for what they hold (`session_cookie_name`, `token_url`, `authorization_endpoint`), none of which ends in a suffix. The values are collected once per request, when the first line is written. Only values the configuration holds are known - a secret read from a vault, a database row or a request is not, so keep it out of messages yourself. Context keys are stripped like context strings: a key that is or contains a secret is written with `[REDACTED]` in its place, and a key that then has the same name as one already written in that array gets `#2` appended (`#3` and on, in the order logged), so neither value is lost. The `error-log` extension strips the same values from the message and trace it stores, and the error handler from what it prints to a command line's STDERR for an uncaught exception and reports to PHP's `error_log` when writing the log itself fails - as does the extension when its own insert fails. Those outputs are also kept to one line the way a log line is: line breaks and control characters, bidirectional controls included, are written as escapes (`\n`, `\u001B`), so a message cannot forge a second line, and a string over 64 KiB is cut. The debug trace on STDERR keeps one line per frame.
+
+The URL spellings are `rawurlencode()`'s and `urlencode()`'s, and the JSON spellings are
+`json_encode()`'s with each combination of `JSON_UNESCAPED_SLASHES` and `JSON_UNESCAPED_UNICODE`.
+Nothing else is: not `&`, `<`, `>`, `'` or `"` written as a `\u` escape (`\u0026`, `\u003C`,
+`\u0027`, `\u0022` - PHP's `JSON_HEX_*` flags, and the default of some other encoders), not a `\u`
+escape in uppercase hex (`\u00F6` where PHP writes `\u00f6`), not JSON encoded twice, not
+`htmlspecialchars()` output, not percent-encoding in lowercase hex (`%2f`). A secret that reaches
+the log in such a form is written in it, so do not log a payload produced by another encoder that
+may carry one. None of this changes which configured values count as secrets.
+
+`Kernel::boot()` and the error handler turn `zend.exception_ignore_args` on, so a booted
+application's traces carry no arguments. If you turn arguments back on, mark the parameters that take
+secrets `#[\SensitiveParameter]`: a trace argument is cut and escaped, so its secret may not match.
 
 Secret collection itself is limited to 32 map levels, 5,000 entries and 256 KiB of key names
 and unique secret values. Shared secret strings are collected only once. If the scan exceeds
 these limits or fails, the writer omits the entire caller message and context, writing only
 `[REDACTED: configured secrets could not be collected safely]` for each line for the rest of
-that writer's lifetime. A partial scan is never treated as complete redaction. Simplify a
+that writer's lifetime; STDERR and `error_log` get the same placeholder in place of the message. A partial scan is never treated as complete redaction. Simplify a
 recursive or oversized application config to restore ordinary log payloads.
 
 ## Database
@@ -167,6 +191,10 @@ Equivalently, in `config/framework.local.php`:
 ],
 ```
 
+With the `mysql` driver, `database.hostname`, `database.database` and `database.username` must not be blank, whitespace included: mysqlnd reads an empty host as `localhost`, the local socket, which may serve another environment's database, and an empty database or user connects without one. A blank value refuses database use with a config error naming every blank key. A blank `database.password` is accepted; SQLite and other drivers are not judged by this rule.
+
+Database validation is lazy: `Config::init()` and `Kernel::boot()` do not read this section into its DTO or connect to the database. The first `Config::database()` validates it, and a database operation invokes that path before connecting. A homepage that needs no database can succeed with invalid database settings. Smoke-test a DB-backed route on staging; boot success alone is not a database preflight.
+
 MySQL connection sessions are always pinned to `+00:00`, so database defaults such as
 `CURRENT_TIMESTAMP(6)` store UTC. This is deliberately not configurable. `project.timezone`
 controls user-facing display and input, not storage.
@@ -176,8 +204,10 @@ statement. Do not set `PDO::MYSQL_ATTR_INIT_COMMAND` or `Pdo\\Mysql::ATTR_INIT_C
 connection carrying an application value for it is refused rather than silently overwritten.
 Execute any additional session setup explicitly after connecting.
 
-`database.options` is currently limited to string keys, so PDO attribute constants (which are
-integers) set there never reach the driver. Do not rely on it for connection options such as TLS
+`database.options` takes string keys only. PDO attribute constants are integers and would never reach
+the driver, so an integer key refuses the first database use instead of being dropped,
+in whichever config layer it is set. Do not rely on
+it for connection options such as TLS
 settings, or for timeouts: MySQL waits are bounded by `database.connect_timeout` (1-300 seconds,
 default 10) and `database.read_timeout` (1-86400 seconds, default 300), which also caps a
 `Db::lock()` wait. See [Database: Timeouts](07-Database.md).
@@ -199,8 +229,19 @@ Use `database.ssl` for MySQL TLS, for example in `config/framework.local.php`:
 A CA or client certificate/key pair requests TLS. Client certificates are optional,
 but `cert` and `key` must be supplied together. Keep private keys outside `public/`
 and readable only by the application account. Server certificate verification defaults
-to true; configure the issuing CA rather than disabling verification. An empty SSL
-section requests no TLS. These settings apply to MySQL, not other PDO drivers.
+to true; configure the issuing CA rather than disabling verification. `[]`, or no `ssl`
+key, requests no TLS. These settings apply to MySQL, not other PDO drivers.
+
+`database.ssl` and `database.options` must each be a map with string keys, `[]`, `null` or absent. A scalar,
+a list or an integer key (`'ssl' => true`, `'ssl' => 'required'`, `'ssl' => ['/etc/ssl/ca.pem']`,
+`'options' => [PDO::ATTR_TIMEOUT => 5]`) refuses the first database use with a config
+error naming the key, never the value, instead of being read as `[]` and connecting without TLS. So
+does an `ssl` map that holds a setting while requesting no TLS, which is what the example above
+becomes with `ca` left blank: a `verify_server_cert` or any other key beside no CA and no
+`cert`/`key` pair. Blank certificate-path strings and `null` request nothing, so a map holding only
+those values means no TLS when `verify_server_cert` is absent or `null`. A blank string for
+`verify_server_cert` is invalid, while `true` or `false` there without a CA or client certificate/key
+pair is a setting that requests no TLS and is refused. Prefer `[]` for no TLS.
 
 ## Extension Config
 
@@ -228,7 +269,10 @@ From inside an extension's Boot class, prefer typed config via `CoreConfig::exte
 
 ## Environment Variables
 
-All `SIMPRA_*` variables map to config paths and are merged in as the highest-precedence layer (same list-replace semantics as above). Empty or missing variables are silently skipped.
+Only the `SIMPRA_*` variables listed below have built-in mappings. Mapped configuration values are
+merged as the highest-precedence layer; empty or missing variables are silently skipped. Other
+environment variables, including extension toggles, have no effect unless your local configuration
+reads them explicitly.
 
 ```
 SIMPRA_PROJECT_URL    ->  project.url

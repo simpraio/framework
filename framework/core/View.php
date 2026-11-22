@@ -10,7 +10,7 @@ use InvalidArgumentException;
 
 final readonly class View
 {
-    private const string NAME_REGEX = '#^[a-z0-9_][a-z0-9_\-]*(?:/[a-z0-9_][a-z0-9_\-]*)*$#';
+    private const string NAME_REGEX = '#^[a-z0-9_][a-z0-9_\-]*(?:/[a-z0-9_][a-z0-9_\-]*)*$#D';
     private const int CACHE_TTL = 60;
 
     public function __construct(

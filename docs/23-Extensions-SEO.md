@@ -34,6 +34,10 @@ The seo extension is a `Contributor`. It injects four tokens into the layout on 
 
 Place them in the `<head>` section of your layout template:
 
+Leave these markers unfilled by `Layout::compose()` so the contributor can replace them. In
+particular, remove the shipped layout's `HEAD_TITLE` and `HEAD_DESCRIPTION` replacements when
+enabling SEO; its `defaults` above supply the fallback text instead.
+
 ```
 <title>{HEAD_TITLE}</title>
 <meta name="description" content="{HEAD_DESCRIPTION}">

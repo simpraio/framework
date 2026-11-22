@@ -7,22 +7,15 @@ namespace core\config;
 use RuntimeException;
 
 /**
- * Refuses a local layer that sets a key closely resembling a declared one: a misspelt key is merged
- * like any other, nothing reads it, and the setting it meant stays at its default - project.allowed_host
- * leaves the Host guard off, extensions.csrf.enabeld leaves CSRF off.
- *
- * Declared means set by a committed config/*.php file, plus the database keys, which have no committed
- * file. A key that resembles none is not judged: a product's credentials and its own settings are left
- * out of the committed config on purpose. Nor is a key shaped unlike the one it resembles, which is how a
- * product's local-only `blog` section boots beside `log`. The framework's own sections are compared at
- * every depth; a product's section only at its own keys, since a product may key a nested map by
- * deployment.
+ * Reject likely typos without forbidding local-only product settings.
+ * Compare framework sections recursively, but only immediate product-section keys:
+ * nested product maps may use arbitrary deployment names rather than setting names.
  */
 final class MisspeltKeys
 {
     private const array FRAMEWORK_SECTIONS = ['project', 'route', 'language', 'session', 'log', 'database', 'extensions'];
 
-    /** Never committed, since its credentials must not be; the values are placeholders. */
+    /** Key schema for the database section, which has no committed default config file. */
     private const array DATABASE = [
         'driver' => '',
         'hostname' => '',
@@ -108,12 +101,8 @@ final class MisspeltKeys
     }
 
     /**
-     * Whether $value could be meant for $declared. A map is meant for a map it shares a key with, so
-     * `blog` beside `log` is a product's own section while `sesion` holding `secure` is session misspelt.
-     * Keys are compared only where they are settings ($keyed): header names and the keys of a map in a
-     * product's section are anyone's, and an empty array has none, so any map may be meant for those.
-     * Anything but a map is meant for anything but a map; `[]` over a map changes nothing even when spelt
-     * right, so leaving `'sesion' => []` unjudged loses nothing.
+     * Settings maps must share a key to be plausible typos; arbitrary-key maps need only match shape.
+     * This lets a product's `blog` section coexist with `log` without hiding `sesion.secure`.
      */
     private static function sameShape(mixed $value, mixed $declared, bool $keyed): bool
     {
@@ -129,7 +118,7 @@ final class MisspeltKeys
 
     /**
      * The closest declared key within one edit of $key, two for a key of eight characters or more,
-     * ignoring case. Two swapped neighbours count as one edit: `enabeld` is the commonest typo of all.
+     * ignoring case. Two swapped neighbours count as one edit.
      *
      * @param list<string> $declared
      */
@@ -139,7 +128,6 @@ final class MisspeltKeys
         $limit = strlen($key) >= 8 ? 2 : 1;
         $best = null;
         foreach ($declared as $candidate) {
-            // Each length difference is an edit, so most candidates are out of reach without comparing them.
             if (abs(strlen($candidate) - strlen($key)) > $limit) {
                 continue;
             }

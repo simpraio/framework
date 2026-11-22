@@ -57,9 +57,7 @@ final class Boot extends ExtensionBoot implements Hook, Contributor
 
     private function deny(Config $config, Request $request): Response
     {
-        // Only a guest carries a target. Someone signed in who lacks the rights is not going to
-        // gain them by signing in again, so sending them onward would be a loop with a detour.
-        // Either redirect depends on who asked, so no shared cache may keep it for the URL.
+        // Reauthentication cannot grant missing permissions; keep authenticated denials out of the sign-in loop.
         if (!User::isGuest()) {
             if ($config->deniedRedirect === '/') {
                 throw new HttpException(403);

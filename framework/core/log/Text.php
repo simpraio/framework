@@ -4,19 +4,13 @@ declare(strict_types=1);
 
 namespace core\log;
 
-/**
- * Keeps logged text on one line, showing what was logged, and bounded. Exception messages and
- * context values carry request input, so a log line is attacker-influenced text.
- */
 final class Text
 {
     private const int MAX_BYTES = 65_536;
 
     /**
-     * Escapes C0 and C1 controls, DEL, U+2028 and U+2029, and the bidirectional controls and byte order
-     * mark that make a terminal or log viewer show other text than was logged; invalid UTF-8 becomes
-     * '?' first. Every escape other than \0 is also a valid JSON escape, and json_encode() already
-     * escapes every C0 control, so an encoded context stays JSON that decodes to what was logged.
+     * Escape line, terminal and direction controls to prevent forged or misleading log entries.
+     * Preserve encoded context as valid JSON; its C0 controls are already escaped by json_encode().
      */
     public static function escape(string $text): string
     {

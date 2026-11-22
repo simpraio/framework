@@ -7,7 +7,7 @@ For remote MySQL servers, configure verified TLS using
 
 On Unix-like systems, for `database.hostname` `localhost` the MySQL driver connects through the
 local Unix socket and ignores `database.port`, so it could reach a different server than the port
-names. There a port other than 3306 with `localhost` is refused when the configuration is read;
+names. There a port other than 3306 with `localhost` is refused when the database settings are first read;
 use `127.0.0.1` to connect to a TCP port. On Windows the driver connects to `localhost` over TCP
 and uses the port, so any port is accepted.
 
@@ -36,7 +36,12 @@ deleted files stay deleted. Generated caches and logs, Git/editor metadata and `
 are excluded. Links that resolve outside the temporary copy are refused.
 
 Xdebug is disabled for this process tree only, and an inherited `SIMPRA_BUNDLE_DIR` is
-cleared so tests do not write to the caller's cache. The default command is
+cleared so tests do not write to the caller's cache. `TMPDIR` points to a fresh owner-only directory
+inside the copy, so temporary suite output and file-backed test state are removed with it, including
+after the runner is killed. Fixtures deliberately using another location, such as the cross-user
+bundle-permission check, clean up that location separately. Cancelling the wrapper sends the
+command's process group `SIGTERM` and, if anything in it is still running five seconds later,
+`SIGKILL`, so a test ignoring `SIGTERM` cannot keep the copy from being removed. The default command is
 `bash tools/test-mysql-tls.sh php tests/run_all.php`: all discovered generic suites run with
 the disposable database fixtures available. The existing prerequisites above apply, plus
 Bash, GNU tar and the usual Linux utilities including `setsid`.
@@ -47,7 +52,24 @@ To run a single suite or another explicit command in the copy:
 wsl.exe -d SimpraUbuntu -- bash tools/test-wsl.sh php tests/core/router.php
 ```
 
+For optional two-worker execution with the same disposable database fixtures:
+
+```powershell
+wsl.exe -d SimpraUbuntu -- bash tools/test-wsl.sh bash tools/test-mysql-tls.sh php tests/run_all.php --jobs=2
+```
+
+The runner defaults to `--jobs=1`. With `--jobs=2`, unmarked suites run exclusively first,
+then audited suites carrying a `// @parallel-safe: ...` comment run in at most two isolated
+PHP processes. New suites remain exclusive unless explicitly reviewed for shared database,
+filesystem, cache and process state. The marker must be a real PHP comment, not generated
+fixture text. Both modes discover the same suites and enforce the same outcome checks.
+
 The command's exit status is preserved; success, failure and cancellation remove the copy.
+If the runner terminates abruptly, the wrapper also stops its remaining workers and fixture
+subprocesses. Killing an unsupervised `php tests/run_all.php` with `SIGKILL` cannot run PHP cleanup;
+use the wrapper for this process-tree guarantee.
+Commands must honor `TMPDIR` for temporary-file cleanup to cover their output. An explicit PHP
+`sys_temp_dir` setting overrides it; files directed elsewhere remain the caller's responsibility.
 The wrapper does not change the checkout or permanently change PHP settings. It is not a
 sandbox: local configuration and database environment variables still name the same servers
 as a normal test run, and generic database suites can write there. Use a test database.
@@ -104,7 +126,7 @@ $affected = Db::execute('DELETE FROM sessions WHERE expires_at < ?', [time()]);
 
 Parameters are sent as strings. A float is written in the shortest form that reads back as the
 same float (`0.1 + 0.2` is sent as `0.30000000000000004`), not cut to the `precision` ini's 14
-digits. For an exact decimal such as an amount of money, pass a string and use a `DECIMAL` column.
+digits, and the same whatever `precision` or `serialize_precision` php.ini sets. For an exact decimal such as an amount of money, pass a string and use a `DECIMAL` column.
 
 ## Convenience methods
 
@@ -125,7 +147,7 @@ $names = Db::values('users', 'id', 'name', ['active' => 1]);
 // Insert a row - created_at is left to its DEFAULT CURRENT_TIMESTAMP(6)
 Db::insert('log', ['user_id' => $id, 'action' => 'login']);
 
-// Replace (INSERT ... ON DUPLICATE KEY equivalent in MySQL)
+// MySQL REPLACE: a conflicting row is deleted and a new one inserted, not updated in place
 Db::replace('settings', ['key' => 'theme', 'value' => 'dark']);
 
 // Update rows - returns affected row count
@@ -136,6 +158,10 @@ Db::delete('sessions', ['user_id' => $id]);
 ```
 
 `update()` and `delete()` throw `RuntimeException` when `$where` is empty - an unbounded `UPDATE` or `DELETE` must be written as a raw `execute()` call to make the intent explicit.
+
+`replace()` is not `INSERT ... ON DUPLICATE KEY UPDATE`: omitted columns take their defaults, and
+delete/insert triggers and foreign-key actions may run. Use an explicit upsert query when an existing
+row must be updated in place.
 
 ### Condition values
 
@@ -203,6 +229,7 @@ Nested calls use savepoints. If rollback fails or the backend ends the whole tra
 all enclosing callbacks are aborted: further database operations and commit are refused,
 even if an inner exception is caught. Reconnection is allowed after those callbacks exit.
 Retry the whole transaction from outside it, not just the last statement.
+Retry only when the callback is safe to repeat; external actions are not rolled back with the database.
 
 On MySQL these statement errors abort the transaction the same way, and it is rolled back at
 once: a deadlock (1213), an exhausted lock table (1206), a lock wait timeout (1205), a MariaDB
@@ -233,6 +260,17 @@ goes with it - the server releases it when it ends that session, which after a r
 only once the timed-out statement has finished there - so every later database call in the callback throws
 `RuntimeException` (`Database connection was lost while Db::lock() held its lock`) instead of
 reconnecting and carrying on unprotected. The next call after the callback returns reconnects.
+The connection is discarded the same way, with the same refusal for the rest of the callback, in two
+more cases inside a `Db::transaction()` within the callback: when its rollback throws, and when a
+statement or the commit is refused because an earlier error aborted the transaction (`Database
+transaction is aborted`). Every connection discarded inside the callback refuses the rest of it,
+whether or not the connection was actually lost: the lock goes with the discarded session.
+That session ends once nothing holds its PDO any more. If something still does - a statement
+returned by `Db::query()` and still referenced, or a kept exception whose trace records call
+arguments (`zend.exception_ignore_args` off: PHP's built-in default, which `Kernel::boot()` and the
+error handler turn on), or Xdebug's develop mode, which keeps the arguments of the last few
+exceptions thrown whatever that setting says - the session lives on and keeps the lock until that
+object is freed, normally at the end of the request.
 If the release finds the connection lost, `Db::lock()` does not throw for it: the lock went with
 the session, so it returns the callback's result - or lets the callback's own exception through -
 and the next call reconnects. The release cannot tell when that session ended, though. A callback
@@ -242,7 +280,16 @@ process - while the callback was still running. `Db::lock()` therefore logs a wa
 and saying that exclusivity may have lapsed while the callback ran (when the log is initialized, as
 in a booted application). Keep a locked callback's idle time well below `wait_timeout`. Inside a
 `Db::transaction()` that loss aborts the transaction, as any lost connection does. Any other
-error from the release still throws.
+error from the release still throws, and the lock is then still held, so `Db::lock()` discards
+the connection first: the session and its lock end once nothing holds its PDO, the next call after
+the callback opens a new connection, and an enclosing `Db::lock()` callback or `Db::transaction()`
+is refused for the rest of it as above. The case to know is a `Database` built with
+`Pdo\Mysql::ATTR_USE_BUFFERED_QUERY` off (`database.options` takes string keys only, so it cannot
+set it): a `Db::query()` statement still referenced when the callback returns, before it has
+reported the end of its rows, refuses every statement on its session (2014), the release included,
+and the lock lasts until that statement - and, with arguments kept in traces, the exception
+`Db::lock()` throws - is freed. Fetching the last row is not enough: fetch until
+`fetch()` returns `false`, use `fetchAll()`, or call `closeCursor()` before the callback returns.
 
 MySQL lock names are server-wide, so the framework prefixes yours with a hash of `database.database`: every process of the application takes the same lock - an old and a new release directory during a deployment, servers with the code at different paths - while an application using another database on the same server does not. The prefix takes 17 of MySQL's 64 characters, leaving 47 for the name.
 
@@ -272,7 +319,10 @@ php tools/migrate.php <release> <shared> <tag>
 runner reads nothing else: not `config/*.php`, not `SIMPRA_DB_*`. If the application takes any database
 setting from elsewhere - a host or password from the PHP-FPM environment, `ssl` from committed config -
 the runner connects to what the local file alone says, which can be another database, or the right one
-without TLS.
+without TLS. It applies some of the framework's checks to that section before connecting: an `ssl` or
+`options` that is not a map with string keys, an `ssl` map that holds settings but requests no TLS, and a
+blank hostname, database or username are refused. The `localhost` port rule and the timeout ranges are
+not checked; on Unix-like systems a `localhost` host always migrates through the local socket.
 
 Exit code `0` means publish: nothing was pending, or every pending file was applied. The runner prints
 a line for each file it applied, or one line saying why there was nothing to migrate. `1` means do not

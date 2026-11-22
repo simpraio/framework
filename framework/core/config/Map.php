@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace core\config;
 
+use RuntimeException;
+
 final class Map
 {
     /**
-     * A map of settings, as opposed to a list or a scalar. `[]` is neither map nor list: PHP cannot tell
-     * which it was meant to be, so the caller decides.
+     * An empty array cannot express whether a settings map or a list was intended; the caller decides.
      *
      * @phpstan-assert-if-true non-empty-array<array-key, mixed> $value
      */
@@ -30,14 +31,32 @@ final class Map
     }
 
     /**
+     * Absent or null is the empty map; any other value that is not a map of strings is an error, never a
+     * map with entries dropped: a header written as false would otherwise just not be sent.
+     *
      * @param array<string, mixed> $raw
+     * @param string $field the key path a refusal names
      * @return array<string, string>
+     * @throws RuntimeException
      */
-    public static function stringMap(array $raw, string $key): array
+    public static function stringMap(array $raw, string $key, string $field): array
     {
         /** @var mixed $value */
-        $value = $raw[$key] ?? null;
-        return self::strings($value);
+        $value = $raw[$key] ?? [];
+        $entries = is_array($value)
+            ? $value
+            : throw new RuntimeException("Config: '{$field}' must be a map of strings keyed by name, got " . get_debug_type($value) . '.');
+
+        $map = [];
+        foreach (array_keys($entries) as $name) {
+            $entryName = is_string($name)
+                ? $name
+                : throw new RuntimeException("Config: '{$field}' must be a map keyed by name, got an entry with a numeric key.");
+            $map[$entryName] = is_string($entries[$name])
+                ? $entries[$name]
+                : throw new RuntimeException("Config: '{$field}.{$name}' must be a string, got " . get_debug_type($entries[$name]) . '.');
+        }
+        return $map;
     }
 
     /** @return array<string, string> */
@@ -58,34 +77,42 @@ final class Map
     }
 
     /**
+     * Absent or null is the empty list; any other value that is not an array of strings is an error, never a
+     * shorter list: a redaction key or an allowlist entry dropped here is dropped unseen. Entries are
+     * trimmed, since padding makes one that never matches, and a blank one is dropped.
+     *
      * @param array<string, mixed> $raw
+     * @param string $field the key path a refusal names
      * @return list<string>
+     * @throws RuntimeException
      */
-    public static function stringList(array $raw, string $key): array
+    public static function stringList(array $raw, string $key, string $field): array
     {
         /** @var mixed $value */
-        $value = $raw[$key] ?? null;
-        if (!is_array($value)) {
-            return [];
-        }
+        $value = $raw[$key] ?? [];
+        $entries = is_array($value)
+            ? $value
+            : throw new RuntimeException("Config: '{$field}' must be a list of strings, got " . get_debug_type($value) . '.');
 
-        $list = [];
-        foreach (array_keys($value) as $index) {
-            if (!is_string($value[$index]) || $value[$index] === '') {
-                continue;
-            }
-            $list[] = $value[$index];
-        }
-        return array_values(array_unique($list));
+        $trimmed = array_map(
+            static fn(mixed $entry): string => is_string($entry)
+                ? trim($entry)
+                : throw new RuntimeException("Config: '{$field}' must hold strings only, got " . get_debug_type($entry) . ' in an entry.'),
+            $entries,
+        );
+
+        return array_values(array_unique(array_filter($trimmed, static fn(string $entry): bool => $entry !== '')));
     }
 
     /**
      * @param array<string, mixed> $raw
+     * @param string $field the key path a refusal names
      * @return list<string>
+     * @throws RuntimeException
      */
-    public static function lowerStringList(array $raw, string $key): array
+    public static function lowerStringList(array $raw, string $key, string $field): array
     {
-        return array_values(array_unique(array_map(strtolower(...), self::stringList($raw, $key))));
+        return array_values(array_unique(array_map(strtolower(...), self::stringList($raw, $key, $field))));
     }
 
     /**

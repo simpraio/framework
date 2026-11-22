@@ -9,10 +9,8 @@ use Exception;
 use Throwable;
 
 /**
- * Cached data a page can render without. A failure is answered with the fallback and logged once
- * per key per request: later calls in the same request get the fallback straight away instead of
- * retrying, and nothing is cached, so the next request tries again. Only exceptions are caught;
- * an Error is a bug and propagates.
+ * Suppress repeated failures per key in this request, but never cache a fallback across requests.
+ * Exceptions use the fallback; Errors propagate.
  */
 final class Optional
 {

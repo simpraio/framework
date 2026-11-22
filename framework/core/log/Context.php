@@ -10,11 +10,6 @@ use JsonSerializable;
 use Throwable;
 use UnitEnum;
 
-/**
- * Turns a log call's context into the JSON written after the message, with the value of every key
- * SensitiveKeys matches replaced by [REDACTED], every known secret value stripped from each key and
- * each string by Secrets, and every string cut by Text::cap().
- */
 final readonly class Context
 {
     private const int JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
@@ -45,14 +40,9 @@ final readonly class Context
     }
 
     /**
-     * A new array, never $value written in place: an element held by reference would carry the write
-     * back into the caller's variable. The context is level 1; an array or object that would be level
-     * MAX_DEPTH + 1 is written as [DEPTH]. Every value counts against $budget, and past MAX_VALUES the
-     * rest of each array is cut and marked [TRUNCATED] - an array referring to itself twice has 2^32
-     * paths to the depth limit. An array's own entries are paid for before anything nested in them is
-     * walked, so a key logged after a large list - a request id - is kept, and the list is what is cut.
-     * Keys and retained string values also spend a shared byte allowance before JSON escaping;
-     * numeric values and placeholder overhead remain bounded by MAX_VALUES.
+     * Copy rather than mutate: referenced elements must not write back into caller data.
+     * Reserve sibling entries before descending so a large child cannot consume their budget.
+     * Shared value and byte budgets bound recursive graphs, which a depth limit alone cannot.
      *
      * @param array<int|string, mixed> $value
      * @return array<int|string, mixed>
@@ -87,8 +77,7 @@ final readonly class Context
     }
 
     /**
-     * $key with every known secret value stripped. A key that strips to the name of one already written
-     * at this level, which overwriting would drop, is written with #2 appended, or #3 and on.
+     * Disambiguate redacted keys so collisions cannot overwrite another context entry.
      *
      * @param array<int|string, mixed> $written
      */
@@ -106,7 +95,6 @@ final readonly class Context
         return $unique;
     }
 
-    /** Only string keys are matched - list items keep their values, though arrays and objects inside them are walked. */
     private function item(int|string $key, mixed $item, int $depth, int &$budget, int &$bytes): mixed
     {
         if (is_string($key) && SensitiveKeys::matches($key, $this->sensitiveKeys)) {

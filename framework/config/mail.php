@@ -10,6 +10,9 @@ return [
             'from_email' => '',
             'from_name'  => '',
 
+            'max_recipients'    => 100,         // recipients of one message
+            'max_message_bytes' => 26_214_400,  // 25 MiB: the text, HTML and attachments, base64 encoded
+
             'smtp' => [
                 'host'       => '',
                 'port'       => 587,
@@ -18,6 +21,7 @@ return [
                 'username'   => '',
                 'password'   => '',     // use framework.local.php - never commit
                 'timeout'    => 30,
+                'ehlo_host'  => '',     // name announced in EHLO; empty: the machine name when valid, else localhost
             ],
         ],
     ],

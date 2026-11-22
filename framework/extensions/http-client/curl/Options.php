@@ -38,7 +38,8 @@ final class Options
             CURLOPT_URL => $url,
             CURLOPT_HTTPGET => $options->method === 'GET',
             CURLOPT_POST => $options->method === 'POST',
-            CURLOPT_HTTPHEADER => Headers::request($options->headers),
+            // The empty value stops cURL asking for 100 Continue before a large body: a server that ignores it costs a second.
+            CURLOPT_HTTPHEADER => [...Headers::request($options->headers), 'Expect:'],
             CURLOPT_HEADERFUNCTION => Headers::response($responseHeaders),
         ];
 
@@ -100,34 +101,35 @@ final class Options
             );
         }
 
+        // PHP-FPM keeps these caches across requests, so a path another process has replaced would still be judged as it was.
+        clearstatcache(true);
+
         $jarDir = realpath($config->cookieJarDir);
-        if ($jarDir === false) {
-            throw new HttpClientException(
-                'Configured cookie_jar_dir does not exist: ' . $config->cookieJarDir,
-                $url,
-            );
+        if ($jarDir === false || !is_dir($jarDir)) {
+            throw new HttpClientException('Configured cookie_jar_dir is not an existing directory', $url);
         }
 
         $cookieDir = realpath(dirname($options->cookies));
         if ($cookieDir === false) {
-            throw new HttpClientException(
-                'Cookie file directory does not exist: ' . dirname($options->cookies),
-                $url,
-            );
+            throw new HttpClientException('Cookie file directory does not exist', $url);
         }
 
         if ($cookieDir !== $jarDir
             && !str_starts_with($cookieDir, $jarDir . DIRECTORY_SEPARATOR)
         ) {
-            throw new HttpClientException(
-                'Cookie path must be under cookie_jar_dir: ' . $config->cookieJarDir,
-                $url,
-            );
+            throw new HttpClientException('Cookie path must be under cookie_jar_dir', $url);
+        }
+
+        // cURL gets the checked file, never a link or a directory: it reads and writes through the first, and spins on the second.
+        // Nothing here stops another process from swapping the file afterwards, so the jar must be writable by the application only.
+        $cookieFile = $cookieDir . DIRECTORY_SEPARATOR . basename($options->cookies);
+        if (is_link($cookieFile) || (file_exists($cookieFile) && !is_file($cookieFile))) {
+            throw new HttpClientException('Cookie path must be a regular file, not a symbolic link or a directory', $url);
         }
 
         return [
-            CURLOPT_COOKIEJAR => $options->cookies,
-            CURLOPT_COOKIEFILE => $options->cookies,
+            CURLOPT_COOKIEJAR => $cookieFile,
+            CURLOPT_COOKIEFILE => $cookieFile,
         ];
     }
 }

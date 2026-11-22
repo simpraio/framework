@@ -7,16 +7,8 @@ namespace core\log;
 use RuntimeException;
 
 /**
- * Decides which names carry a secret. Names compare lowercased with surrounding whitespace and every
- * '_', '-', ' ' and '.' removed, so accessToken, access_token and Access-Token are one name. A name is
- * secret when it is one of DEFAULT_KEYS or a configured key, or when it ends in one of SECRET_SUFFIXES
- * (db_password, id_token, jwt_signing_key). Configured keys add to the defaults and cannot remove one.
- * private_key_bits, token_ttl and a plain cache_key end in none of them and stay visible.
- *
- * Headers are suffixes rather than names because $_SERVER prefixes them: HTTP_AUTHORIZATION,
- * REDIRECT_HTTP_AUTHORIZATION, HTTP_COOKIE. Plurals are listed because a plural cannot end in its
- * singular, and a plural is the usual name for a whole set of secrets - $_COOKIE logged as cookies.
- * Only the key is judged: a header list of name/value pairs carries its secret under 'value'.
+ * Configured names add to built-ins, never replace them. Suffix matching also covers $_SERVER header prefixes.
+ * Key-based detection cannot identify secrets stored under a generic name such as 'value'.
  */
 final class SensitiveKeys
 {
@@ -24,7 +16,6 @@ final class SensitiveKeys
     private const int MAX_VALUES = 5_000;
     private const int MAX_BYTES = 262_144;
 
-    /** Secret names the suffixes do not already cover. */
     private const array DEFAULT_KEYS = ['crypt_key'];
 
     private const array SECRET_SUFFIXES = [
@@ -68,6 +59,11 @@ final class SensitiveKeys
      * Every string held under a secret name in $map, at any depth, including each string of a list or
      * map kept under one: api_tokens => ['a', 'b'] gives both.
      *
+     * An int or float counts only when its own key is a secret name, spelled as Cast::string() spells
+     * it: password => 12345678 gives '12345678'. A number merely inside a secret-named map is a setting,
+     * not a secret - cookie => ['lifetime' => 3600] gives nothing - so harmless digits are not
+     * redacted from every log line. Bools and null are never collected.
+     *
      * @param array<array-key, mixed> $map
      * @param array<string, true> $index from index()
      * @return list<string>
@@ -97,10 +93,16 @@ final class SensitiveKeys
             if (--$state['remaining'] < 0 || $state['bytes'] < 0) {
                 throw new RuntimeException('Log secret collection exceeded its limits');
             }
-            $secret = $underSecret || (is_string($key) && self::matches($key, $index));
+            $named = is_string($key) && self::matches($key, $index);
+            $secret = $underSecret || $named;
             if (is_array($value)) {
                 self::collect($value, $index, $secret, $depth + 1, $state);
-            } elseif ($secret && is_string($value)) {
+                continue;
+            }
+            if ($named && (is_int($value) || is_float($value))) {
+                $value = (string)$value;
+            }
+            if ($secret && is_string($value)) {
                 if (!array_key_exists($value, $state['values'])) {
                     if (strlen($value) > $state['bytes']) {
                         throw new RuntimeException('Log secret collection exceeded its limits');

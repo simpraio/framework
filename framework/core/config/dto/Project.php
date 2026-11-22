@@ -24,9 +24,7 @@ final readonly class Project
     /** @param array<string, mixed> $raw */
     public static function fromArray(array $raw): self
     {
-        // Only a missing key or [] switches the Host check off. Anything else that is not a list -
-        // null included, which a local file can set over the default - is a mistake, and reading it
-        // as [] would switch the check off without a word.
+        // Null or malformed input must not silently disable the Host guard as [] would.
         /** @var mixed $hosts */
         $hosts = array_key_exists('allowed_hosts', $raw) ? $raw['allowed_hosts'] : [];
         if (!is_array($hosts)) {

@@ -122,13 +122,8 @@ final class Config
     }
 
     /**
-     * Every configured string the log must not write: those under a key SensitiveKeys or
-     * log.redact_keys names - project.crypt_key, database.password, extensions.mail.smtp.password, an
-     * OIDC client_secret - from every layer, environment included.
-     *
-     * Only for stripping these values from what is logged - the log file, the error handler's error_log()
-     * lines, the error-log extension's rows. They are returned in plaintext, so never log, render or
-     * store the result itself.
+     * Plaintext values under sensitive keys in the merged configuration, for log redaction only.
+     * Never log, render or persist this result itself.
      *
      * @internal
      * @return list<string>

@@ -7,12 +7,8 @@ namespace extensions\security;
 use core\http\Response;
 
 /**
- * The cache headers configured among the security headers are for responses that are the same for
- * every visitor. A response that set its own, on the Response or with header(), keeps its policy,
- * unless it is bound to one visitor or one request - an error that depends on who asked, a session,
- * credentials, a cookie, a nonce - which gets no-store and no other cache header: its controller cannot
- * know that a later hook starts a session. Only a policy on the Response that already keeps every shared
- * cache out stands there.
+ * Configured cache headers are defaults for shared pages, not visitor-bound responses.
+ * Recheck after all hooks: a later hook can start a session after a controller chose its policy.
  */
 final class CachePolicy
 {
@@ -44,9 +40,7 @@ final class CachePolicy
             return;
         }
 
-        // One sent with header() keeps the configured policy off as well, but never counts as the
-        // Response's own above: session_start() sends session.cache_limiter's headers the same way, and
-        // with nothing configured they are not this hook's to replace.
+        // Respect raw policies too, including PHP's session cache limiter when no policy is configured.
         if ($ownPolicy || $bound
             || array_any(headers_list(), static fn(string $line): bool => self::isCacheHeader(trim(explode(':', $line, limit: 2)[0])))) {
             return;
@@ -57,9 +51,7 @@ final class CachePolicy
     }
 
     /**
-     * Whether the Response's own policy already keeps every shared cache out: no-store, or a private that
-     * names no fields - private="Set-Cookie" lets a shared cache keep the rest - with no header beside it
-     * that a cache reads ahead of Cache-Control.
+     * Field-qualified private permits caching the remaining fields; targeted CDN headers can override Cache-Control.
      */
     private static function keepsSharedCachesOut(Response $response): bool
     {
@@ -68,8 +60,7 @@ final class CachePolicy
                 return false;
             }
         }
-        // A quoted argument becomes '=', not nothing: a comma inside it splits no directive, and pri"x"vate
-        // cannot read as private. A quote left over is an unclosed one.
+        // Keep a placeholder for quoted text so pri"x"vate cannot become a private directive.
         $policy = preg_replace('~"(?:[^"\\\\]|\\\\.)*"~s', replacement: '=', subject: $response->getHeader('Cache-Control') ?? '');
         if ($policy === null || str_contains($policy, '"')) {
             return false;

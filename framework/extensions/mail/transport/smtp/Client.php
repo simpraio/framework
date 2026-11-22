@@ -18,8 +18,7 @@ final readonly class Client
         private Config $config,
         private Connection $connection,
     ) {
-        $host = gethostname();
-        $this->helloHost = is_string($host) ? $host : 'localhost';
+        $this->helloHost = $config->resolvedEhloHost();
     }
 
     public static function connect(Config $config): self
@@ -101,17 +100,16 @@ final readonly class Client
     }
 
     /**
-     * With the terminator written the server may already have committed the message, so anything
-     * but its own reply leaves the delivery unknown rather than failed: a caller retrying it could
-     * deliver the message twice. For the same reason any 2xx counts as accepted, though RFC 5321
-     * answers the data with 250.
+     * After the DATA terminator, a missing or invalid verdict leaves delivery unknown, not retry-safe.
+     * Accept any complete 2xx verdict to avoid duplicate delivery, though RFC 5321 specifies 250. Only a 4xx or
+     * 5xx refuses the message; any other reply, a 354 or a 1xx, is no verdict either way.
      */
     private function expectDataVerdict(): void
     {
         try {
             self::expect($this->connection->read(), range(start: 200, end: 299));
         } catch (Throwable $e) {
-            if (str_starts_with($e->getMessage(), 'SMTP:')) {
+            if (str_starts_with($e->getMessage(), 'SMTP: 4') || str_starts_with($e->getMessage(), 'SMTP: 5')) {
                 throw $e;
             }
 
@@ -137,15 +135,7 @@ final readonly class Client
 
     private static function expect(string $response, int|array $expected): void
     {
-        if ($response === '') {
-            throw new RuntimeException('SMTP_EMPTY_RESPONSE');
-        }
-
-        if (preg_match('/^\d{3}([ -]|\r?\n)/', $response) !== 1) {
-            throw new RuntimeException('SMTP_INVALID_RESPONSE');
-        }
-
-        $code = (int)substr(string: $response, offset: 0, length: 3);
+        $code = Reply::code($response);
 
         if (!in_array($code, (array)$expected, strict: true)) {
             throw new RuntimeException('SMTP: ' . trim($response));

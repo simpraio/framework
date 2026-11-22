@@ -29,9 +29,8 @@ final class User
     }
 
     /**
-     * The provider is never asked again after sign-in, so an account disabled there, or removed
-     * from a required group, stays signed in here until this age forces a new sign-in. A stamp
-     * up to clock_skew ahead of this host's clock was made by another host and still counts.
+     * Provider revocations are not polled; a nonzero session_max_age forces periodic sign-in.
+     * When age checking is enabled, tolerate future timestamps only within configured clock skew.
      *
      * @param array<array-key, mixed> $data
      */

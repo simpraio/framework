@@ -11,8 +11,6 @@ interface Registration
 {
     public string $clientId { get; }
 
-    public string $clientSecret { get; }
-
     public string $redirectUri { get; }
 
     public function authorizeUrl(): string;
@@ -20,6 +18,14 @@ interface Registration
     public function tokenUrl(): string;
 
     public function scopeList(): string;
+
+    /**
+     * The token endpoint fields that authenticate this client (a secret, or a signed client
+     * assertion). Throws LoginException when the credential cannot be used, before any request.
+     *
+     * @return array<string, string>
+     */
+    public function clientAuthentication(Provider $config): array;
 
     /** Whether redemption repeats the scope list. Microsoft expects it; Google does not. */
     public function sendsScopeOnRedemption(): bool;

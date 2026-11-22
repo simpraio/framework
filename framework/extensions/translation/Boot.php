@@ -24,7 +24,8 @@ final class Boot extends ExtensionBoot implements Contributor
         $page = Store::tokens($route->pathId(), $route->language);
 
         return [
-            'rawTokens' => [...$layout, ...$page],
+            // array_replace, not a spread: an id such as 404 is an integer key, which a spread renumbers.
+            'rawTokens' => array_replace($layout, $page),
         ];
     }
 

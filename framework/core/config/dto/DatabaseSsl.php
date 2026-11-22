@@ -30,7 +30,7 @@ final readonly class DatabaseSsl
             throw new RuntimeException('Config: database.ssl.cert and database.ssl.key must be set together.');
         }
 
-        return new self(
+        $ssl = new self(
             ca: Cast::string($raw['ca'] ?? null, 'database.ssl.ca'),
             cert: $cert,
             key: $key,
@@ -40,6 +40,15 @@ final readonly class DatabaseSsl
                 true,
             ),
         );
+
+        if (!$ssl->enabled() && array_any($raw, static fn(mixed $setting): bool => $setting !== null && $setting !== '')) {
+            throw new RuntimeException(
+                "Config: 'database.ssl' holds settings but requests no TLS; set 'ca' to verify the server, or 'cert' "
+                . "and 'key' for a client certificate, or leave it as [] for a connection without TLS.",
+            );
+        }
+
+        return $ssl;
     }
 
     public function enabled(): bool

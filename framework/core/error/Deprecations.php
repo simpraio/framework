@@ -8,10 +8,8 @@ use core\log\Writer;
 use core\tools\Identifier;
 
 /**
- * Records each distinct deprecation once per request, and at most MAX of them, so a deprecated call
- * in a loop is one log line rather than one exclusive-lock write per iteration. The state is static,
- * so it lasts as long as the process: a CLI script or worker records each one once per run, and
- * nothing more once MAX is reached.
+ * Deduplicate and cap deprecations to avoid repeated locked writes in loops.
+ * Static state lasts for the request, or the whole run in a long-lived CLI worker.
  */
 final class Deprecations
 {

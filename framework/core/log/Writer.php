@@ -31,9 +31,7 @@ final class Writer
 
     /**
      * @param list<string> $redactKeys context keys to scrub besides SensitiveKeys' built-in ones
-     * @param (Closure(): list<string>)|null $secrets the values to strip from the message and every
-     *     context string. Called once, when the first line is written: collecting them walks the whole
-     *     configuration, a cost most requests, writing no line, would pay for nothing.
+     * @param (Closure(): list<string>)|null $secrets lazily collected on the first written line
      */
     public function __construct(
         private readonly string $directory,
@@ -87,25 +85,22 @@ final class Writer
         if (!is_file($filename)) {
             self::create($filename);
         }
-        // Logging must never fail the caller: under the error handler a refused write would be an
-        // exception thrown from Log::info(). The line goes to PHP's own error log instead.
+        // A refused write must reach the fallback, not become an ErrorException in the caller.
         if (Silently::call(static fn(): int|false => file_put_contents($filename, $line, FILE_APPEND | LOCK_EX)) === false) {
             error_log('Logger: cannot write ' . $filename . ': ' . rtrim($line, characters: "\n"));
         }
     }
 
     /**
-     * Log lines can carry personal data, and a file's permissions are checked only when it is opened: a
-     * new log is made under a name nobody else knows, owner-only, given its mode, and only then linked
-     * into place. If another request linked it first, that one stands. Where that cannot be done - no
-     * hard links, or no temporary file beside it - the file is created under its name and narrowed
-     * straight after.
+     * Set permissions before publishing the log's name to close the permissive-creation window.
+     * Without temporary files or hard links, narrow permissions immediately after creation instead.
+     * link(), not rename(): a log another request created first stands.
      */
     private static function create(string $filename): void
     {
         $directory = dirname($filename);
         $temporary = Silently::call(static fn(): string|false => tempnam($directory, prefix: '.log-'));
-        // tempnam() falls back to the system temporary directory, from which no link reaches here.
+        // tempnam() may fall back outside this directory, where a same-filesystem link is not assured.
         if ($temporary === false || realpath(dirname($temporary)) !== realpath($directory)) {
             if ($temporary !== false) {
                 Silently::call(static fn(): bool => unlink($temporary));
@@ -125,10 +120,8 @@ final class Writer
     }
 
     /**
-     * Closes $file to other accounts. The group keeps what the umask gives a new file, so a web server
-     * and CLI jobs sharing a group can append; that mode is read back from $created, a file just made -
-     * asking umask() for the mask sets it for a moment, and another thread of a threaded server would
-     * create its files under that mask. A separate probe is created and removed when $created is not $file.
+     * Keep umask-granted group access for web/CLI sharing, but remove all other-account access.
+     * Read a newly created file's mode: querying umask() briefly changes process-wide state on threaded servers.
      */
     private static function narrow(string $file, string $created): void
     {
@@ -144,7 +137,6 @@ final class Writer
         Silently::call(static fn(): bool => chmod($file, permissions: ($mode === false ? 0o600 : $mode) & 0o660));
     }
 
-    /** Delete log files older than retentionDays. Runs at most once per day. */
     public function prune(): void
     {
         if ($this->retentionDays <= 0) {
@@ -153,13 +145,16 @@ final class Writer
 
         Cache::once('log.prune:' . $this->directory, function (): void {
             $cutoff = time() - ($this->retentionDays * 86_400);
-            $files = glob($this->directory . '/*.log');
-            if ($files === false) {
+            // scandir, not glob: [ ] * ? in the install path are ordinary characters.
+            $names = Silently::call(fn(): array|false => scandir($this->directory));
+            if ($names === false) {
                 return;
             }
-            foreach ($files as $file) {
+            $logs = array_filter($names, static fn(string $name): bool => preg_match('/^[^.].*\.log$/Ds', $name) === 1);
+            foreach ($logs as $name) {
+                $file = $this->directory . '/' . $name;
                 $mtime = filemtime($file);
-                if ($mtime !== false && $mtime < $cutoff) {
+                if ($mtime !== false && $mtime < $cutoff && is_file($file)) {
                     unlink($file);
                 }
             }

@@ -19,26 +19,25 @@ final class HttpClient
     {
         // First, so a refused URL - credentials included - is never sent anywhere.
         if (Url::parse($url) === null) {
-            throw new HttpClientException('HTTP client URL rejected', $url);
+            throw new HttpClientException('HTTP client URL rejected', $url, sent: false);
         }
 
         try {
             $requestOptions = new RequestOptions($options);
         } catch (InvalidArgumentException $e) {
-            throw new HttpClientException($e->getMessage(), $url);
+            throw new HttpClientException($e->getMessage(), $url, sent: false);
         }
 
         $config = CoreConfig::extensionConfig(Config::NAME, Config::class);
 
         if (!$config->enabled) {
-            throw new HttpClientException('HTTP client is disabled', $url);
+            throw new HttpClientException('HTTP client is disabled', $url, sent: false);
         }
 
-        if (!$config->egress->allows($url)) {
-            throw new HttpClientException('HTTP client egress blocked', $url);
-        }
+        // Before the egress check: it resolves the host, and that time is part of the call.
+        $flight = new Flight(Deadline::in(Options::callTimeout($config, $requestOptions)));
 
-        return self::attempt($config, $url, $requestOptions, Deadline::in(Options::callTimeout($config, $requestOptions)));
+        return self::attempt($config, $url, $requestOptions, $flight);
     }
 
     /** @param array<string, mixed> $options */
@@ -57,39 +56,35 @@ final class HttpClient
         Config $config,
         string $url,
         RequestOptions $options,
-        Deadline $deadline,
+        Flight $flight,
         int $redirects = 0,
     ): Response
     {
         $retry = 0;
         while (true) {
-            [$ok, $error, $status, $message, $responseHeaders, $body] = self::dial($config, $url, $options, $deadline);
+            [$ok, $error, $status, $message, $responseHeaders, $body] = self::dial($config, $url, $options, $flight, $redirects > 0);
 
             if ($ok && $error === 0) {
                 $target = $options->followRedirects && $redirects < Redirect::MAX
-                    ? self::redirectTarget($config, $url, $status, $responseHeaders)
+                    ? self::redirectTarget($url, $status, $responseHeaders, $flight)
                     : null;
                 if ($target === null) {
                     return new Response(status: $status, headers: $responseHeaders, body: $body);
                 }
 
-                return self::attempt($config, $target, $options->forRedirect($status, Redirect::sameOrigin($url, $target)), $deadline, $redirects + 1);
+                return self::attempt($config, $target, $options->forRedirect($status, Redirect::sameOrigin($url, $target)), $flight, $redirects + 1);
             }
 
             if ($error === CURLE_WRITE_ERROR) {
-                throw new HttpClientException(
-                    "Response exceeded {$config->maxResponseBytes} bytes",
-                    $url,
-                    $error,
-                );
+                throw $flight->failure("Response exceeded {$config->maxResponseBytes} bytes", $url, $error);
             }
 
             $shouldRetry = Retry::permitted($error, $options)
                 && $retry < $config->retries
-                && $deadline->remainingMs() > $config->retryDelay * 1000;
+                && $flight->deadline->remainingMs() > $config->retryDelay * 1000;
 
             if (!$shouldRetry) {
-                throw new HttpClientException($message, $url, $error);
+                throw $flight->failure($message, $url, $error);
             }
 
             if ($config->retryDelay > 0) {
@@ -105,26 +100,28 @@ final class HttpClient
      * @return array{0: bool, 1: int, 2: int, 3: string, 4: array<string, string|list<string>>, 5: string}
      *     [ok, curlError, httpStatus, curlMessage, responseHeaders, body]
      */
-    private static function dial(Config $config, string $url, RequestOptions $options, Deadline $deadline): array
+    private static function dial(Config $config, string $url, RequestOptions $options, Flight $flight, bool $redirect): array
     {
-        $remaining = $deadline->remainingMs();
-        if ($remaining < 1) {
-            throw new HttpClientException('HTTP client timeout exceeded', $url, CURLE_OPERATION_TIMEDOUT);
-        }
-
-        // Revalidate every dial, including retries and redirect hops.
+        // A hop or retry with no time left is not worth a lookup.
+        $flight->timeLeft($url);
+        // Revalidate every hop and retry, then pin this resolution: no second lookup, and DNS rebinding cannot swap the address.
         $pinned = $config->egress->resolvedFor($url);
         if ($pinned === null) {
-            throw new HttpClientException('HTTP client egress blocked', $url);
+            throw $flight->failure($redirect ? 'HTTP client redirect egress blocked' : 'HTTP client egress blocked', $url);
         }
+        // A lookup cannot be cut short: what it took comes out of what is left for the transfer.
+        $remaining = $flight->timeLeft($url);
 
         $handle = curl_init();
         $responseHeaders = [];
         $body = '';
 
-        $curlOptions = Options::curl($config, $url, $options, $responseHeaders, $body);
+        try {
+            $curlOptions = Options::curl($config, $url, $options, $responseHeaders, $body);
+        } catch (HttpClientException $rejected) {
+            throw $flight->failure($rejected->getMessage(), $url, $rejected->curlError, $rejected);
+        }
         if ($pinned !== []) {
-            // Prevent DNS rebinding by pinning the validated addresses.
             $curlOptions[CURLOPT_RESOLVE] = [Resolve::entry($url, $pinned)];
         }
 
@@ -132,9 +129,9 @@ final class HttpClient
         unset($curlOptions[CURLOPT_TIMEOUT]);
         $curlOptions[CURLOPT_TIMEOUT_MS] = $remaining;
 
-        self::configure($handle, $curlOptions, $url);
+        self::configure($handle, $curlOptions, $url, $flight);
 
-        [$ok, $error, $status, $message] = self::execute($handle);
+        [$ok, $error, $status, $message] = self::execute($handle, $flight);
 
         unset($handle);
 
@@ -146,19 +143,23 @@ final class HttpClient
      *
      * @param array<int, mixed> $curlOptions
      */
-    private static function configure(\CurlHandle $handle, array $curlOptions, string $url): void
+    private static function configure(\CurlHandle $handle, array $curlOptions, string $url, Flight $flight): void
     {
         if (!curl_setopt_array($handle, $curlOptions)) {
-            throw new HttpClientException('Could not configure the cURL handle', $url);
+            throw $flight->failure('Could not configure the cURL handle', $url);
         }
     }
 
     /** @return array{0: bool, 1: int, 2: int, 3: string} [ok, curlError, httpStatus, curlMessage] */
-    private static function execute(\CurlHandle $handle): array
+    private static function execute(\CurlHandle $handle, Flight $flight): array
     {
+        $ok = curl_exec($handle) !== false;
+        $error = curl_errno($handle);
+        $flight->transferred($error);
+
         return [
-            curl_exec($handle) !== false,
-            curl_errno($handle),
+            $ok,
+            $error,
             (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE),
             curl_error($handle),
         ];
@@ -169,7 +170,7 @@ final class HttpClient
      *
      * @param array<string, string|list<string>> $responseHeaders
      */
-    private static function redirectTarget(Config $config, string $url, int $status, array $responseHeaders): ?string
+    private static function redirectTarget(string $url, int $status, array $responseHeaders, Flight $flight): ?string
     {
         if (!Redirect::isStatus($status)) {
             return null;
@@ -182,15 +183,12 @@ final class HttpClient
 
         // Checked even with egress off: a redirect can introduce what the caller never sent.
         if (Url::parse($target) === null) {
-            throw new HttpClientException('HTTP client redirect URL rejected', $target);
+            throw $flight->failure('HTTP client redirect URL rejected', $target);
         }
         // A cross-origin hop carries no credentials, but its path, query and response would
         // still travel in the clear, unauthenticated.
         if (Redirect::isDowngrade($url, $target)) {
-            throw new HttpClientException('HTTP client redirect downgrade rejected', $target);
-        }
-        if (!$config->egress->allows($target)) {
-            throw new HttpClientException('HTTP client redirect egress blocked', $target);
+            throw $flight->failure('HTTP client redirect downgrade rejected', $target);
         }
 
         return $target;

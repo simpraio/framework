@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace core\extension;
 
 use core\config\Config;
+use core\tools\Silently;
+use RuntimeException;
 
 /**
  * Hyphenated directories map to underscored namespace segments.
@@ -17,8 +19,7 @@ final class Loader
     public static function buildMap(string $dir): array
     {
         $map = [];
-        // Every extension goes into the map, enabled or not: the local file and environment variables
-        // are read on every request, so which of them run is decided in instantiate(), not here.
+        // Bundle disabled extensions too: local and environment overrides decide enablement per request.
         foreach (self::folders($dir) as $name) {
             $configFile = "{$dir}/{$name}/Config.php";
             $class = 'extensions\\' . self::namespaceName($name) . '\\Boot';
@@ -77,8 +78,7 @@ final class Loader
     }
 
     /**
-     * Ordered here rather than in the map, so a bundle built before a PRIORITY changed still runs
-     * in the right order. Stable: equal priorities keep the map's folder-name order.
+     * Read priorities at runtime, not from the bundle; equal priorities keep folder-name order.
      *
      * @template T of object
      * @param list<T> $instances
@@ -98,11 +98,19 @@ final class Loader
     /** @return list<string> */
     private static function folders(string $dir): array
     {
-        if (!is_dir($dir)) {
-            return [];
+        // scandir, not glob: [ ] * ? in the install path are ordinary characters.
+        $names = is_dir($dir) ? Silently::call(static fn(): array|false => scandir($dir)) : [];
+        if ($names === false) {
+            throw new RuntimeException("Extensions: cannot list the extensions directory {$dir}.");
         }
-        $found = glob($dir . '/*', GLOB_ONLYDIR);
-        return $found === false ? [] : array_map(basename(...), $found);
+
+        $folders = array_values(array_filter(
+            $names,
+            static fn(string $name): bool => !str_starts_with($name, '.') && is_dir($dir . '/' . $name),
+        ));
+        sort($folders, SORT_STRING);
+
+        return $folders;
     }
 
     private static function isEnabled(string $name, ?string $configFile): bool
@@ -127,8 +135,7 @@ final class Loader
     }
 
     /**
-     * Through the core config's cache, keyed as the extension's own hooks look it up, so deciding on
-     * every request that an extension runs does not build its Config a second time.
+     * Share the hooks' config cache so enablement checks do not construct a second Config.
      *
      * @param class-string $class
      */

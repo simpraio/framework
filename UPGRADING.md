@@ -65,6 +65,165 @@ project-root `VERSION` records the target release; do not update it after a fail
 6. Run your test suite and smoke-test staging with `project.debug = false`.
 7. Only after the upgrade steps and validation succeed, update the project-root `VERSION` to the target package's `VERSION`. Leave it unchanged if the upgrade is incomplete or a check fails.
 
+## 5.3.0 -> 5.4.0
+
+**Impact:** none for most applications. Replace the framework files and copy `AGENTS.md`; there are no
+Required steps and no schema or template changes. Settings that were read leniently are now refused, with
+a config error naming the key. Database settings are checked at the first database use, so smoke-test a
+DB-backed route as well as the homepage with `project.debug = false`. Check the Conditional items before
+deploying; 3 and 5 concern code built on the sign-in `Registration` interface, 4 certificate sign-in.
+The release package carries no `tests/`: a project that vendors the generic suite re-vendors it from the
+framework's development repository at the 5.4.0 release, as item 6 says.
+
+### Conditional
+
+1. If an HTTP client call has a short `timeout` and its host resolves slowly, the DNS lookup now counts
+   against the timeout, and the call can end with `curlError` 28 before anything is sent. Raise that
+   call's `timeout`.
+2. If a `Db::lock()` callback catches a failed transaction and keeps using the database, every later call
+   in it now throws `Database connection was lost while Db::lock() held its lock` when the failure dropped
+   the connection. Retry the whole `Db::lock()` call only when the entire callback is safe to repeat;
+   work already committed or external actions are not undone by losing the connection.
+   A lock-release failure other than a lost connection now discards the connection too: if you catch
+   it, do not continue an enclosing transaction or lock callback. Consume or close unbuffered query
+   cursors before returning from a lock callback; retry the whole enclosing operation only when safe.
+3. If your code **implements** `extensions\oidc_login\oidc\Registration` (the framework's own Microsoft
+   and Google registrations are the only implementations it ships, and a project normally has none),
+   add the new method or the class no longer loads:
+
+   ```php
+   use extensions\oidc_login\Provider;
+
+   // Old: the token exchange read $registration->clientSecret itself.
+   // New: it sends the fields this method returns.
+   public function clientAuthentication(Provider $config): array
+   {
+       return ['client_secret' => $this->clientSecret];
+   }
+   ```
+
+4. To use a certificate - required where the tenant blocks client secrets ("Client secrets are blocked
+   by a tenant-wide policy") - upload the certificate to the app registration (**Certificates & secrets ▸
+   Certificates**), keep its unencrypted RSA private key (at least 2048 bits) on the server outside the
+   deployed tree, readable only by root and the PHP account, and add:
+
+   ```php
+   'client_credential'  => 'certificate',
+   'client_certificate' => '/absolute/path/to/client.crt',
+   'client_private_key' => '/absolute/path/to/client.key',
+   ```
+
+   `tenant` must then be a directory GUID, not `common`, `organizations` or `consumers`. An existing
+   `client_secret` may stay configured: only the selected credential is used, so switching back is
+   `'client_credential' => 'secret'`. Without the selector, a configured certificate is ignored and the
+   secret is still required. Certificate sign-in requires PHP 8.5 or later, PHP's `openssl` extension and
+   OpenSSL 3.1 or later (`php -r 'echo OPENSSL_VERSION_TEXT;'`; Ubuntu 22.04 and 24.04 and Debian 12 ship
+   3.0). On PHP 8.4, or a PHP built against OpenSSL 3.0, an enabled provider selecting `certificate` is a configuration error
+   (an older OpenSSL library loaded at runtime is refused at sign-in instead, by the salt check):
+   upgrade before enabling it, or explicitly select `secret` where the tenant permits secrets. Secret
+   authentication and disabled certificate providers remain supported on PHP 8.4.
+   Replace any smaller RSA key and upload its new matching certificate before enabling certificate
+   sign-in. A key below 2048 bits is refused at sign-in with `MS_LOGIN_CLIENT_CREDENTIAL_UNAVAILABLE`
+   before a token request is sent; the files are not read during configuration loading.
+
+5. If your code reads `clientSecret` from a value typed as `extensions\oidc_login\oidc\Registration`
+   (for example `$provider->registration->clientSecret`), the interface no longer declares it. It still
+   works at runtime with the framework's two registrations, but a static analyzer reports it. Narrow
+   the type first (`instanceof \extensions\oidc_login\microsoft\Registration`), or call
+   `clientAuthentication($provider)`, which returns `['client_secret' => ...]` only for the secret
+   credential. An implementation of the interface may keep the property but no longer has to.
+
+6. If your project vendors the generic test suite, replace all of it - `tests/core/`, `tests/extensions/`,
+   `tests/integration/`, `tests/root.php`, `tests/helpers.php` and `tests/run_all.php` - from the
+   framework's development repository at the 5.4.0 release; `tools/verify-vendored.php` compares them,
+   and suites depend on new shared fixtures, so do not replace single files. Until then, do not run the
+   old suite against a live database: through 5.3.0 the registry suite deleted the registry groups
+   `system` and `days_in_week`. If it ever did, check those groups and restore them from a backup.
+7. If `database.ssl` or `database.options` is set, each must be a map, `[]` or `null`:
+   `grep -nE "[\"'](ssl|options)[\"'][[:space:]]*=>" framework.local.php config/*.php`. For TLS write
+   `'ssl' => ['ca' => '/path/to/ca.pem']`, for none `[]`. `'ssl' => true`, a list, the template with a
+   blank `ca`, `false` or `''`, a map holding only `verify_server_cert`, and integer keys in `options`
+   (PDO constants, which never took effect) are refused.
+   `tools/migrate.php` refuses the same `ssl` and `options` settings before it connects; if you use it, copy
+   the 5.4.0 version into your `tools/`.
+8. If the application lives under a path containing `[`, `]`, `*` or `?`, it ran with an empty config and
+   extension map. Delete `cache/config.php` and `cache/extensions.php`, and expect the Host guard, security
+   headers, auth, CSRF and rate limiting to take effect for the first time, and log pruning to delete logs
+   older than `log.retention_days`. Everywhere, `config/` must hold at least one default file.
+9. Write `log.redact_keys`, `extensions.error-log.redact_keys`, `extensions.http-client.egress.allowlist`
+   and `language.available` as arrays of strings, and `extensions.security.headers` values as strings
+   (`''` drops a header). Other types are refused, extension settings even while the extension is
+   disabled.
+10. A warning or notice inside `config/*.php` or `framework.local.php`, such as an undefined variable, now
+    stops the boot, naming the file and line.
+11. With the `mysql` driver, set a non-blank `hostname`, `database` and `username`; write `'localhost'`
+    for the local socket.
+12. If an HTTP client `cookies` path is a symbolic link, or exists as something other than a regular file
+    (a directory, for example), the call now throws before anything is sent; pass a regular file inside
+    `cookie_jar_dir`, or one that does not exist yet. A `cookie_jar_dir` that is not a directory is refused too. The cookie error messages no longer end in
+    a path.
+    Keep `cookie_jar_dir` writable only by the application account, never shared with uploads or
+    other accounts: the checks cannot prevent another process replacing a file after validation.
+13. Remove any `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `TE`, `Upgrade`, `Expect` or
+    `Proxy-*` header from HTTP client calls; it now throws. To find them, which also lists unrelated
+    `'host' =>` keys:
+    `grep -rniE "[\"'](host|content-length|transfer-encoding|connection|te|upgrade|expect|proxy-[a-z-]+)[\"'][[:space:]]*(=>|\])" app modules`.
+14. An address with a quoted local part (`"jane doe"@example.test`) is refused as a recipient
+    (`INVALID_RECIPIENT`). As `from()` it is ignored, so the message goes out from
+    `extensions.mail.from_email`; when that is unusable too, the send fails with `MAIL_FROM_MISSING`.
+15. A message to more than 100 recipients, or whose encoded text, HTML and attachment payloads exceed
+    25 MiB, is refused at send (`TOO_MANY_RECIPIENTS`, `MESSAGE_TOO_LARGE`). Headers and MIME framing
+    are not counted. Raise `extensions.mail.max_recipients` (1 to 1000) or
+    `max_message_bytes` (1024 to 268435456; a value outside is a config error), and keep `memory_limit`
+    above about four times the size cap.
+16. An attachment name over 255 bytes is refused (`INVALID_ATTACHMENT`). So is an entry written straight
+    into `Message::$attachments` that `attach()` would not make, such as a media type with parameters, a
+    non-ASCII `filename` or a missing `encodedFilename`; build attachments with `attach()`.
+17. A script parsing command-line STDERR now sees an uncaught exception's message with `\n` and `\u001B`
+    escapes and configured secrets as `[REDACTED]`, or `[REDACTED: configured secrets could not be
+    collected safely]`. The framework's own `error_log()` lines are escaped and capped the same way.
+18. `Sender`, `Return-Path`, `Received` and `Content-Disposition` set with `Message::header()` are now
+    dropped. Digit-only names such as `0123`, which previously went out, are dropped too; a direct
+    `Envelope` refuses them with `INVALID_ENVELOPE_HEADER_NAME`. Rename any such fields and update
+    code reading them before deploying.
+19. A relay reached with `encryption` `ssl` must support TLS 1.2 or 1.3; one offering only TLS 1.0 or 1.1
+    now fails with `SMTP_CONNECT_FAILED`.
+20. If custom configuration code calls `core\config\Map::stringList()`, `lowerStringList()` or
+    `stringMap()`, add the required third argument naming the full configuration key. For example,
+    `Map::stringList($raw, 'names')` becomes
+    `Map::stringList($raw, 'names', 'extensions.example.names')`; the same old/new argument shapes
+    apply to the other two methods. A value that is not an array, or an entry of the wrong type, now throws
+    instead of being silently dropped; `stringList()` entries are trimmed.
+21. Write an internationalised host in an HTTP client URL in punycode: `https://bücher.example/` now
+    throws `HttpClientException('HTTP client URL rejected')` before anything is sent, because cURL would
+    connect to `xn--bcher-kva.example`, a name the egress allowlist was never asked about. The same holds
+    for `extensions.oidc-login.<provider>.redirect_uri`: a configured non-empty redirect URI with a
+    non-ASCII host is now a config error even when the provider or whole extension is disabled.
+    Register and configure its punycode form, or clear the URI while the provider is disabled.
+
+### Good to know
+
+1. `HttpClientException::$sent` is `false` only when nothing of the request was written; resend a POST only
+   then.
+2. An unusable certificate or key, or a PHP without the `openssl` extension, fails only Microsoft
+   sign-in, with `MS_LOGIN_CLIENT_CREDENTIAL_UNAVAILABLE`, and never the boot: the files are read,
+   and the `openssl` extension is needed, only at sign-in (a PHP built against OpenSSL older than 3.1 is a config error, item 4; an older library
+   loaded at runtime is refused at sign-in by the salt check).
+3. Certificate assertions use PS256 only. The salt is checked on every signature: signing failure,
+   an unreadable salt or a salt other than 32 bytes refuses sign-in with
+   `MS_LOGIN_CLIENT_CREDENTIAL_UNAVAILABLE` before any token request is sent. There is no automatic
+   RS256 or secret fallback; verify certificate sign-in on the deployment's PHP/OpenSSL build.
+
+4. After the data, an incomplete reply or a `354` or `1xx` reply is `SMTP_DELIVERY_UNKNOWN`; before the
+   data, an incomplete reply is `SMTP_INVALID_RESPONSE`. Neither starts with the `SMTP: ` prefix of a
+   definite rejection, which is a `4xx` or `5xx`.
+5. The generated text part puts each block on its own line and spells out links as `text (url)`. Pass
+   `->text()` to send your own.
+6. Config errors name the full key, such as `extensions.http-client.egress.allowlist`, and Microsoft
+   sign-in reports a missing client ID and a missing secret separately.
+7. Without `extensions.mail.smtp.ehlo_host`, a machine name that is not a valid host name is announced as
+   `localhost`; set `ehlo_host` if your relay refuses that.
+
 ## 5.2.0 -> 5.3.0
 
 **Impact:** the compiled bundles and new log files are no longer readable by other accounts,

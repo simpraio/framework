@@ -32,8 +32,7 @@ final readonly class Smtp implements MailTransport
     }
 
     /**
-     * The 250 after DATA committed the message. A server that hangs up instead of answering QUIT
-     * must not turn it into a failed send: the caller would retry and deliver the message twice.
+     * DATA was accepted: a QUIT failure must not invite a retry that delivers the message twice.
      */
     private static function quit(Client $client): void
     {

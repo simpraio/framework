@@ -16,10 +16,8 @@ use Throwable;
 final class Login
 {
     /**
-     * $returnTo is where a successful sign-in lands instead of success_redirect - typically the
-     * page that sent the user to log in. Only a path on this site is kept; anything else, such
-     * as an absolute or protocol-relative URL, is ignored rather than refused. It stays on the
-     * server with this sign-in and is never sent to the provider.
+     * A local $returnTo overrides success_redirect; unsafe targets are ignored.
+     * Keep it server-side with this sign-in, never in the provider request.
      */
     public static function start(string $provider, ?string $returnTo = null): Response
     {

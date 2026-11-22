@@ -136,7 +136,9 @@ See [Templates](05-Templates.md) for the full token, block, and row rendering AP
 
 ## Returning Responses
 
-Return a `Response` to send output directly to the client, bypassing the layout. Every static constructor accepts an optional HTTP status as its last argument.
+Return a `Response` to send output directly to the client, bypassing the layout. `html()`, `text()`,
+`json()` and `redirect()` accept an optional HTTP status as their last argument; `noContent()` takes
+no arguments and returns status 204.
 
 ```
 Response::html('<p>fragment</p>');           // 200 text/html
@@ -190,7 +192,7 @@ Read accessor - does not chain:
 
 ```
 // read a header back (useful in tests or extensions)
-->getHeader(string $name):  - string
+->getHeader(string $name): ?string
 
 // the cookies the response will set, each as ['name' => ..., 'value' => ..., 'options' => [...]]
 ->cookies: list<array>

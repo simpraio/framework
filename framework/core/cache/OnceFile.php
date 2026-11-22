@@ -9,11 +9,9 @@ use core\tools\Silently;
 use Throwable;
 
 /**
- * Cache::once() without APCu: a host-local sentinel file per key, recording when the work last
- * completed. The sentinels live in the deployment's bundle directory, which no other account may write
- * to - a shared temporary directory would let one plant a link at a predictable name and have this
- * process write through it. Without a directory, or where no sentinel can be opened, the callback runs
- * unguarded.
+ * Sentinels require a deployment-private directory: shared temporary storage permits symlink planting.
+ * Kernel::boot() points this at the bundle directory.
+ * Missing or unavailable storage runs the callback unguarded.
  *
  * @internal
  */
@@ -21,7 +19,6 @@ final class OnceFile
 {
     private static ?string $directory = null;
 
-    /** Kernel::boot() points this at the bundle directory. */
     public static function init(string $directory): void
     {
         self::$directory = rtrim($directory, characters: '/\\');
@@ -49,8 +46,7 @@ final class OnceFile
             if (!flock($fp, LOCK_EX | LOCK_NB)) {
                 return false;
             }
-            // Another process may have finished between the check above and this lock. The sentinel
-            // records when the work completed: opening it creates it empty, so it says nothing by existing.
+            // Recheck under the lock: existence alone proves nothing because opening creates an empty sentinel.
             if (self::ranWithin(stream_get_contents($fp, offset: 0), $ttl)) {
                 return false;
             }

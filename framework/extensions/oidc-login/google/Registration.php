@@ -67,6 +67,12 @@ final readonly class Registration implements OidcRegistration, JsonSerializable
         return self::SCOPES;
     }
 
+    /** @return array<string, string> */
+    public function clientAuthentication(Provider $config): array
+    {
+        return ['client_secret' => $this->clientSecret];
+    }
+
     public function sendsScopeOnRedemption(): bool
     {
         return false;

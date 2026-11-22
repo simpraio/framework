@@ -28,7 +28,7 @@ A minimal Boot class with all three interfaces:
 ```php
 namespace extensions\myext;
 
-use core\extension\Boot;
+use core\extension\Boot as ExtensionBoot;
 use core\extension\Bootable;
 use core\extension\Contributor;
 use core\extension\Hook;
@@ -36,12 +36,12 @@ use core\http\Request;
 use core\http\Response;
 use core\http\Route;
 
-final class Boot extends \core\extension\Boot
+final class Boot extends ExtensionBoot
     implements Bootable, Hook, Contributor
 {
     public function boot(): void { }
 
-    public function before(Request $request, Route $route):  - Response
+    public function before(Request $request, Route $route): ?Response
     {
         return null;
     }
@@ -61,7 +61,7 @@ Implementing `Hook` gives the extension two entry points per request. Hooks run 
 
 ```
 // runs before dispatch - return a Response to short-circuit, null to continue
-public function before(Request $request, Route $route):  - Response
+public function before(Request $request, Route $route): ?Response
 
 // runs after the final response is ready - use to add headers or log
 public function after(Request $request, Route $route, Response $response): void
@@ -75,7 +75,7 @@ Hooks run only for routes backed by a controller or template. A URL that maps to
 
 ```
 // before: block a route for unauthenticated users
-public function before(Request $request, Route $route):  - Response
+public function before(Request $request, Route $route): ?Response
 {
     if ($route->pathId() === 'admin/dashboard' && !User::inGroup('admin')) {
         return Response::redirect('/login');
@@ -133,7 +133,10 @@ The shipped project config decides what loads. Most bundled extensions are disab
 ],
 ```
 
-Whether an extension runs is read on every request, so turning one on or off in the local file or an environment variable takes effect without deleting `cache/extensions.php`. Adding or removing an extension folder still needs the bundle deleted.
+Whether an extension runs is read on every request, so turning one on or off in the local file takes
+effect without deleting `cache/extensions.php`. There is no built-in extension environment toggle;
+your local file must read any such variable explicitly. Adding or removing an extension folder still
+needs the bundle deleted.
 
 ### Order
 

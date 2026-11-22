@@ -23,7 +23,7 @@ final class Token
         $data = [
             'grant_type' => 'authorization_code',
             'client_id' => $registration->clientId,
-            'client_secret' => $registration->clientSecret,
+            ...$registration->clientAuthentication($config),
             'code' => $code,
             'redirect_uri' => $registration->redirectUri,
             'code_verifier' => $verifier,

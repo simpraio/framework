@@ -5,6 +5,10 @@
 Create `config/ratelimit.php` in your project. The example enables one per-IP budget shared by the
 application routes that reach this hook.
 
+Requires APCu enabled in the serving PHP SAPI (`apc.enable_cli` too for CLI calls). There is no file
+or per-request fallback: without APCu, `Limiter::exceeded()` throws `RuntimeException`, not a 429
+response. Its message is `Rate limiting requires APCu. Install the APCu extension or disable rate limiting.`
+
 ```php
 return [
     'extensions' => [

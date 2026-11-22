@@ -14,13 +14,15 @@ final class Message
     public string $text = '';
     public ?string $fromEmail = null;
     public ?string $fromName = null;
+    /** Set only by messageId(), which checks it. */
+    public private(set) ?string $messageId = null;
 
     private bool $textExplicit = false;
 
     /** @var list<string> */
     public array $recipients = [];
 
-    /** @var array<string, string> */
+    /** @var array<int|string, string> canonical integer names become int keys */
     public array $customHeaders = [];
 
     /** @var list<array{filename: string, encodedFilename: string, mimeType: string, data: string}> */
@@ -47,7 +49,7 @@ final class Message
         $this->html = $html;
 
         if (!$this->textExplicit) {
-            $this->text = trim(html_entity_decode(strip_tags($html), flags: ENT_QUOTES | ENT_HTML5, encoding: 'UTF-8'));
+            $this->text = PlainText::fromHtml($html);
         }
 
         return $this;
@@ -65,6 +67,26 @@ final class Message
     {
         $this->fromEmail = $email;
         $this->fromName = $name;
+
+        return $this;
+    }
+
+    /**
+     * Fixes the Message-ID instead of generating a random one, so a retry of the same send carries the same id
+     * and the receiver can tell it from a second message.
+     *
+     * @param string $messageId "id@host", with or without angle brackets. A key with a colon in it is refused:
+     *                          use hash('sha256', $key) . '@host'
+     */
+    public function messageId(string $messageId): self
+    {
+        $id = str_starts_with($messageId, '<') && str_ends_with($messageId, '>')
+            ? substr($messageId, offset: 1, length: -1)
+            : $messageId;
+
+        HeaderRules::assertMessageId($id);
+
+        $this->messageId = $id;
 
         return $this;
     }
@@ -144,7 +166,7 @@ final class Message
     /** @return array{filename: string, encodedFilename: string, mimeType: string, data: string} */
     private static function buildAttachment(string $name, string $data, finfo $finfo): array
     {
-        if ($name === '') {
+        if ($name === '' || strlen($name) > AttachmentRules::MAX_FILENAME_BYTES) {
             throw new InvalidArgumentException('INVALID_ATTACHMENT');
         }
 

@@ -50,19 +50,23 @@ the security extension's default `Referrer-Policy: strict-origin-when-cross-orig
 only this site's origin. A project that loosens that policy changes this.
 
 Someone who is already signed in and is refused carries no target. They go to
-`denied_redirect` alone, because signing in again would not grant them the page.
+`denied_redirect` alone when it names a destination other than `/`; an empty value or `/` produces
+403 instead. Signing in again would not grant them the page.
 
 ### Redirect paths
 
-`guest_route`, `denied_redirect` and `logout_redirect` accept either form, and the leading
+`guest_route`, `denied_redirect` and `logout_redirect` normalize to the following paths; the leading
 slash is the difference:
 
-| configured | redirects to |
+| configured | normalized path |
 | --- | --- |
 | `'login'` | `/login/` |
 | `'/login'` | `/login` |
 | `'/login/'` | `/login/` |
 | `''` | `/` |
+
+For an access denial, `guest_route` or `denied_redirect` resolving to `/` produces 403 rather than a
+redirect. Logout still redirects to `/` when `logout_redirect` is empty.
 
 A bare name is a route name and takes the `/name/` shape. A value that starts with a slash is
 the path exactly as written, which is what a site whose canonical URLs carry no trailing slash
@@ -108,7 +112,7 @@ This immediate race check applies only when rehashing. Without a rehash, a passw
 
 Logins are throttled on two counters, both keyed on the request's source address: `login_attempts` attempts for one account from one address, and four times that for the address as a whole. Every attempt is counted before its password is checked, and no attempt that reaches the account counter answers faster than a check against a missing account does - a refused one, one against an account whose stored hash is cheaper than the default bcrypt cost, and one against an unusable stored value are all brought up to that time - so a quick answer shows neither that an account exists nor that it holds a cheap hash. Refusals that come before the account is looked up - an empty password, one with a NUL byte, an address over its limit - answer at once, the same whichever account was named. A bcrypt hash costlier than the default, or another algorithm such as Argon2, answers in its own time, which a miss cannot imitate; keep stored hashes at the default cost if that matters. Counting comes first so a burst of concurrent attempts cannot all get past a limit none of them has counted yet; a successful one clears the account's count and hands its own count on the address back, so the address's budget is spent only by failures. The account counter follows the account, not the spelling - `admin`, `Admin` and `admin ` match one row and share one counter - and a name that matches no account is counted lower-cased, without trailing spaces. Nothing is counted per username alone, so a third party cannot lock an account out by failing logins against it from elsewhere. The address is `REMOTE_ADDR`, never a forwarded-for header, so it cannot be spoofed from outside - but that also means a deployment where PHP sees a proxy instead of the client shares one address counter across all users, and the address must be corrected at the front end for the limiter to distinguish them.
 
-Counters live in APCu when available, otherwise in locked files under the system temp directory. Both are host-local, so behind several front-ends each one throttles independently.
+Counters live in APCu when available, otherwise in locked files under the system temp directory. Both are host-local, so behind several front-ends each one throttles independently. A successful login hands its attempt back to the address counter; one that starts in one window and finishes in the next hands it back to the new window instead, so a window can admit up to the previous window's successful logins beyond its cap. The per-account counter is unaffected, and the rate over time stays within the cap.
 
 The fallback directory is `simpra-auth-rl` in PHP's temp directory, created private to the account PHP runs as. Login throttling checks it even with APCu enabled. Another account controlling it could reset or plant counters: on POSIX, a link, group/other-writable directory, or foreign owner where ownership checks are available makes login checks fail with `AUTH_RATE_LIMIT_DIRECTORY_NOT_PRIVATE`. Windows skips these checks; the deployment must configure restrictive ACLs.
 

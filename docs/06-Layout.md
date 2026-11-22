@@ -51,7 +51,10 @@ final class Layout extends Controller
 
 The `$template` argument is the _page_ template - already populated by the page controller. Call `render()` on it and inject the result as a raw token. The same injected controller properties are available here: `$this->view`, `$this->paths`, `$this->route`, and `$this->request`.
 
-The layout can also return a `Response` - useful for enforcing auth, redirecting maintenance pages, or injecting headers globally.
+The layout can also return a `Response`, for example to redirect or add headers to a template-backed
+page. It is not an authorization or maintenance gate: the page controller has already run, and a
+controller returning a `Response` skips the layout entirely. Refuse access in a `before()` hook or in
+the controller before performing protected work.
 
 You are expected to modify `modules/Layout.php` and `templates/layout.html` for each project. Common additions include language tokens, JavaScript asset versions, generation timing, analytics snippets, or metadata contributed by extensions.
 
@@ -60,7 +63,7 @@ You are expected to modify `modules/Layout.php` and `templates/layout.html` for 
 ```
 $assets = new Assets($this->paths->public);
 $assets->version('/assets/css/common.css');  // e.g. '1715000000'
-// used as: /assets/css/common.css - v=1715000000
+// used as: /assets/css/common.css?v=1715000000
 ```
 
 If the file does not exist, `version()` returns `'1'` as a fallback.
@@ -89,6 +92,11 @@ You can add any other tokens your project needs in `modules/Layout.php`.
 ```
 
 **Optional extension contributor tokens** - injected after `compose()` returns if the relevant extension is enabled (see [Contributors](06-Layout.md#contributors) below):
+
+When SEO supplies `HEAD_TITLE` and `HEAD_DESCRIPTION`, remove those two replacements from
+`Layout::compose()` and leave their markers in `templates/layout.html`. The shipped layout fills
+them before contributors run, so SEO cannot replace them afterward. Set fallback text in
+`extensions.seo.defaults` instead.
 
 ```
 {HEAD_TITLE}       // <title> content - provided by the SEO extension

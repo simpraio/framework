@@ -146,7 +146,6 @@ final class Kernel
     private function controllerClass(ResolvedRoute $route): string
     {
         $base = str_replace(search: '-', replace: '', subject: ucwords($route->controller, separators: '-'));
-        // A hyphenated module directory holds an underscored namespace, as an extension's does.
         $module = str_replace(search: '-', replace: '_', subject: $route->module);
 
         return self::MODULES_NS . $module . '\\' . $base;
@@ -162,9 +161,8 @@ final class Kernel
 
         if ($hasController) {
             $instance = $this->makeController($controllerClass, $route);
-            // Class names are case-insensitive, so con-crete finds Concrete once it is loaded - and on a
-            // case-insensitive filesystem loads it. Only the declared spelling is the controller's path.
-            // The namespace is left out: its module segment is a lowercased URL segment either way.
+            // Reject alternate spellings of the same case-insensitive PHP class; route policies key on the URL.
+            // Compare only the class segment: module namespaces already come from lowercased URL segments.
             if (strrchr($instance::class, needle: '\\') !== strrchr($controllerClass, needle: '\\')) {
                 throw new HttpException(404);
             }

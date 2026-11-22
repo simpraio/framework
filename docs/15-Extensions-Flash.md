@@ -20,7 +20,7 @@ Flash data lives in the session and is consumed on the next request. The Boot cl
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Flash::withErrors($errors, $keep)` | `void` | Stores a field-name -> message error map in the session. `$keep` is an optional list of request field names to persist as old input - only listed fields are stored, never passwords or tokens. |
+| `Flash::withErrors($errors, $keep)` | `void` | Stores a field-name -> message error map in the session. `$keep` is an optional list of request field names to persist verbatim as old input. The caller must exclude passwords, tokens and other sensitive fields; Flash does not filter an explicitly listed field. |
 | `Flash::errors()` | `array` | Returns the error map from the previous request. Empty if no errors were flashed. |
 | `Flash::submitted()` | `array` | Returns the old input map from the previous request, keyed by field name. |
 | `Flash::hasErrors()` | `bool` | Returns `true` if any errors were flashed. Also exposed as the `HasErrors` template block by the contributor. |

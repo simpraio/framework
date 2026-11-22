@@ -57,9 +57,7 @@ final class LockState
     }
 
     /**
-     * A release that finds the connection lost cannot tell when the session ended: a KILL or an idle
-     * timeout during the callback dropped the lock while the callback still ran. The warning must not
-     * replace the callback's result or exception, so a log that cannot be written is ignored.
+     * Session loss may have dropped exclusivity during the callback; reporting must not replace its result.
      */
     public function releaseFoundConnectionLost(string $name): void
     {

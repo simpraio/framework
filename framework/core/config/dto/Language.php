@@ -22,7 +22,7 @@ final readonly class Language
     public static function fromArray(array $raw): self
     {
         $default = Cast::string($raw['default'] ?? null, 'language.default', 'en');
-        $available = Map::lowerStringList($raw, 'available');
+        $available = Map::lowerStringList($raw, 'available', 'language.available');
         // A language is matched against the first URL segment; a code that cannot be one never matches.
         // With no languages in URLs the default never meets one: it is only a lookup key then.
         $inUrls = $available === [] ? [] : ['language.default' => [$default], 'language.available' => $available];

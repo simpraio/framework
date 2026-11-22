@@ -28,7 +28,7 @@ final readonly class Config
             enabled:       Cast::bool($raw['enabled'] ?? null, 'extensions.error-log.enabled', false),
             retentionDays: max(0, Cast::int($raw['retention_days'] ?? null, 'extensions.error-log.retention_days', 30)),
             storeTrace:    Cast::bool($raw['store_trace'] ?? null, 'extensions.error-log.store_trace', true),
-            redactKeys:    Map::lowerStringList($raw, 'redact_keys'),
+            redactKeys:    Map::lowerStringList($raw, 'redact_keys', 'extensions.error-log.redact_keys'),
         );
     }
 

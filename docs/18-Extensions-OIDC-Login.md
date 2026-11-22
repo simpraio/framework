@@ -57,8 +57,8 @@ These keys live inside each provider's section, not at the extension root:
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `enabled` | `false` | Enable this provider independently. The root `enabled` must also be true; while it is false every provider is off and its credentials are not checked, so a local file can switch the extension off with the root key alone. |
-| `client_id`, `client_secret` | Empty | Required when enabled. Secrets are redacted from registration dumps and JSON. |
-| `redirect_uri` | Empty | Required when enabled. Absolute HTTPS, except loopback HTTP; no userinfo, fragment, whitespace or backslashes. Never derived from request headers. |
+| `client_id`, `client_secret` | Empty | Required when enabled; for Microsoft, `client_secret` is required only while `client_credential` is `secret` (see below). Secrets are redacted from registration dumps and JSON. |
+| `redirect_uri` | Empty | Required when enabled. Every non-empty value is validated, even for a disabled provider: absolute HTTPS, except loopback HTTP; an ASCII host (punycode for international names); no userinfo, fragment, whitespace or backslashes. Never derived from request headers. |
 | `session_key` | `microsoft.user` / `google.user` | Identity key; pending flows use `<session_key>.flow`. Enabled providers' keys must not overlap, including flow keys. Do not reuse local `auth` keys. |
 | `success_redirect`, `failure_redirect` | `/` | Local paths: `/account` stays exact; `account` becomes `/account/`. |
 | `clock_skew` | `60` | Token-clock tolerance in seconds, clamped to 0-300. |
@@ -74,6 +74,62 @@ These keys live inside each provider's section, not at the extension root:
 | `allowed_groups` | `[]` | Exact group object IDs (GUIDs), not names. Empty imposes no group restriction. Invalid values fail closed. |
 | `group_match` | `any` | Require any or all configured groups. |
 | `graph_fallback` | `true` | Resolve group overage through Graph. Requires permissions and its host allowlisted. |
+| `client_credential` | `secret` | Which credential authenticates the app at the token endpoint: `secret` (`client_secret`) or `certificate` (`client_certificate` + `client_private_key`). Both may be configured; only the selected one is validated and used, and a broken selected credential never falls back to the other. For an enabled provider, any other value is a config error. |
+| `client_certificate`, `client_private_key` | Empty | Used when `client_credential` is `certificate`: absolute paths to the PEM certificate uploaded to the app registration and its unencrypted RSA private key. Selecting the certificate requires both, and `tenant` to be a directory GUID. `client_private_key` ends in a redaction suffix, so its path is a configured secret and reads `[REDACTED]` wherever it appears in a log line. |
+
+#### Choosing the credential: secret or certificate
+
+Both are supported; the application picks one with `client_credential`. The secret is the default, so
+configurations written before the selector existed keep working unchanged. A certificate is the choice
+where the tenant blocks client secrets with an app management policy ("Block password addition"), or
+where a long-lived credential that never travels between people is preferred: the key pair is generated
+on the server, and only the public certificate is uploaded to the app registration (**Certificates &
+secrets ▸ Certificates**).
+
+```php
+'microsoft' => [
+    'enabled' => true,
+    'tenant' => 'YOUR_DIRECTORY_GUID',
+    'client_id' => 'YOUR_MICROSOFT_CLIENT_ID',
+    'client_credential' => 'certificate',
+    'client_certificate' => '/etc/myapp/entra/client.crt',
+    'client_private_key' => '/etc/myapp/entra/client.key',
+    'redirect_uri' => 'https://example.com/auth/microsoft/',
+],
+```
+
+Because both may be configured side by side, moving from one to the other, or back, is a change of
+`client_credential` alone. There is deliberately no automatic fallback: a certificate that fails must
+surface as a failed sign-in, not quietly degrade to the secret.
+
+At each code redemption the provider signs a fresh client assertion (`private_key_jwt`, see
+[Microsoft's certificate credentials](https://learn.microsoft.com/en-us/entra/identity-platform/certificate-credentials)):
+`aud` the tenant's token endpoint, `iss` and `sub` the client ID, a random `jti`, `iat` now, `nbf` one
+minute earlier so a server clock running ahead cannot make it "not yet valid", `exp` five minutes ahead,
+and the certificate's `x5t#S256` thumbprint in the header. If `client_certificate` holds more than one
+certificate, the first is the one used: the key must belong to it and the thumbprint is its own, so put
+the uploaded certificate first in a file that also carries a chain. Only the assertion is sent - never the
+certificate, the key, or a secret. The tenant must be a directory GUID: Microsoft defines the assertion's
+audience for a directory's own token endpoint, not for `common`, `organizations` or `consumers`.
+
+Certificate authentication uses PS256 only and requires PHP 8.5 or later, OpenSSL 3.1 or later and an RSA
+key of at least 2048 bits. Selecting it for an enabled provider on PHP 8.4, or on a PHP built against
+OpenSSL older than 3.1, is a configuration error; secret authentication and disabled providers still
+work there. The version preflight reads PHP's compile-time OpenSSL version; an older library loaded
+at runtime is refused at sign-in by the salt check instead. PHP takes the PSS salt length from the linked OpenSSL's
+default, so each signature is decoded
+with the public key after signing and accepted only when its salt is the 32 bytes PS256 requires
+(RFC 7518). Signing failure, an unreadable salt or any other salt length refuses sign-in with
+`MS_LOGIN_CLIENT_CREDENTIAL_UNAVAILABLE` before a token request is sent; for a wrong salt length, the exception passed to `onFailure` names the OpenSSL library rather than the credential. There is no RS256 or secret fallback.
+
+Signing needs PHP's `openssl` extension; the secret does not. The files are read at sign-in, not at boot:
+a PHP without that extension, a missing or unreadable file (one outside `open_basedir` included),
+a file holding no certificate, a key that is not RSA or has fewer than 2048 bits, a passphrase-protected
+key, or a key that does not belong to the certificate refuses that sign-in with
+`MS_LOGIN_CLIENT_CREDENTIAL_UNAVAILABLE` before anything is sent, and leaves
+every other page working. Store the key unencrypted, readable only by root and the PHP account (for
+example `root:www-data 0640`), outside the web root and the deployed tree, and renew the certificate
+before it expires: an expired certificate is refused at the token endpoint (`MS_LOGIN_TOKEN_REQUEST_FAILED`).
 
 ### Google Settings
 
@@ -121,7 +177,7 @@ final class Google extends Controller
 
 For Microsoft, use `modules/auth/Microsoft.php`, class `Microsoft` and the literal `'microsoft'` in both calls. Keep login/callback controllers reachable by guests, including in local `auth` route rules. A route with no controller or template is still a normal 404; this extension adds no routing middleware.
 
-Missing that rule does more than break sign-in. Under `auth`'s `deny` default policy, a callback route without a guest rule is turned away like any protected page, and the gate carries the request to `guest_route` as its return target - so the provider's `?code=…&state=…` ends up in the sign-in URL, and from there in access logs and browser history. The exposure is limited: a code is single-use, and redeeming it needs the client secret and the PKCE verifier held in the session that began the sign-in. But it is a credential written down where it should not be. The fix is the rule above, not turning off `extensions.auth.return_param`.
+Missing that rule does more than break sign-in. Under `auth`'s `deny` default policy, a callback route without a guest rule is turned away like any protected page, and the gate carries the request to `guest_route` as its return target - so the provider's `?code=…&state=…` ends up in the sign-in URL, and from there in access logs and browser history. The exposure is limited: a code is single-use, and redeeming it needs the client credential and the PKCE verifier held in the session that began the sign-in. But it is a credential written down where it should not be. The fix is the rule above, not turning off `extensions.auth.return_param`.
 
 A successful sign-in lands on the `$returnTo` passed to `Login::start()`, or on `success_redirect` when there is none. Only a path on this site is kept, so an absolute URL, a protocol-relative `//host` or a value with control characters is ignored rather than refused, and the sign-in proceeds to `success_redirect`. The target stays on the server with that sign-in, is never sent to the provider, and is checked again before it is followed. Each tab's sign-in keeps its own target. A failed sign-in always lands on `failure_redirect`.
 
@@ -157,7 +213,14 @@ Controllers must authorize protected actions before performing them. Template bl
 
 **Yes: the same flow supports both signing in and registering with your application.** It verifies an external identity; your app then finds its existing account or creates one according to your registration policy. It does not create a Microsoft or Google account.
 
-Use the configured success route as an application-owned completion controller. For example, inside the Google completion controller:
+Use the configured success route as an application-owned completion controller.
+
+When that route creates accounts or issues local authentication, omit `$returnTo` from
+`Login::start()`: a return target takes precedence over `success_redirect` and would skip completion.
+Keep a validated final destination separately in application session state, and follow it only after
+the completion controller has finished its checks and issued the local session.
+
+For example, inside the Google completion controller:
 
 ```php
 use core\http\HttpException;
@@ -206,7 +269,7 @@ Provider policies are checked at sign-in, not continuously. Invalidate existing 
 - Successful callbacks rotate the session ID and clear `_csrf_token`. Failed account switching preserves the previous identity; a failure redirect does not mean the browser is now signed out.
 - Expected callback failures redirect locally. The optional observer receives a `LoginException` with a stable `reason`; raw provider responses and transport exception details are not forwarded. Observer failures do not replace the redirect. Programming `Error`s propagate; disabled/invalid configuration fails at configuration access.
 
-Common failure suffixes are `NO_FLOW`, `STATE_MISMATCH`, `FLOW_EXPIRED`, `PROVIDER_ERROR`, `NO_CODE`, `HTTP_UNAVAILABLE`, `TOKEN_REQUEST_FAILED`, `TOKEN_INVALID`, `NONCE_MISMATCH`, `TOKEN_EXPIRED`, prefixed by `MS_LOGIN_` or `GOOGLE_LOGIN_`. Microsoft additionally uses `TENANT_MISMATCH`, `GROUPS_UNAVAILABLE`, `GROUP_DENIED`; Google uses `DOMAIN_DENIED`. The root disable code is `OIDC_LOGIN_DISABLED`, and selecting a disabled provider raises `OIDC_LOGIN_PROVIDER_DISABLED`.
+Common failure suffixes are `NO_FLOW`, `STATE_MISMATCH`, `FLOW_EXPIRED`, `PROVIDER_ERROR`, `NO_CODE`, `HTTP_UNAVAILABLE`, `TOKEN_REQUEST_FAILED`, `TOKEN_INVALID`, `NONCE_MISMATCH`, `TOKEN_EXPIRED`, prefixed by `MS_LOGIN_` or `GOOGLE_LOGIN_`. Microsoft additionally uses `TENANT_MISMATCH`, `GROUPS_UNAVAILABLE`, `GROUP_DENIED`, `CLIENT_CREDENTIAL_UNAVAILABLE`; Google uses `DOMAIN_DENIED`. The root disable code is `OIDC_LOGIN_DISABLED`, and selecting a disabled provider raises `OIDC_LOGIN_PROVIDER_DISABLED`.
 
 ## Installing
 

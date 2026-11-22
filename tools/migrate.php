@@ -117,15 +117,43 @@ function configBool(array $section, string $key, string $field, bool $default): 
 }
 
 /**
+ * Same rules as the framework's Database::settings(): absent, null or [] holds none; anything else must be
+ * a map, as an integer key such as a PDO attribute constant never reaches the connection.
+ *
+ * @param array<array-key, mixed> $database
+ * @return array<string, mixed>
+ */
+function configMap(array $database, string $key): array
+{
+    /** @var mixed $value */
+    $value = $database[$key] ?? null;
+    $refusal = "Config: 'database.{$key}' must be a map of settings, or [] for none; got ";
+    if ($value === null) {
+        return [];
+    }
+    if (!is_array($value)) {
+        fail($refusal . get_debug_type($value) . '.');
+    }
+    if (array_any(array_keys($value), static fn(int|string $name): bool => !is_string($name))) {
+        fail($refusal . 'an array with integer keys. A list is no map, and integer-keyed PDO constants are not '
+            . 'carried to the connection: remove them.');
+    }
+
+    /** @var array<string, mixed> */
+    return $value;
+}
+
+/**
  * @param array<array-key, mixed> $database
  * @return array{host: string, port: int, name: string, user: string, password: string, charset: string, ca: string, cert: string, key: string, verify: bool}
  */
 function databaseSettings(array $database): array
 {
-    if (array_key_exists('ssl', $database) && $database['ssl'] !== null && !is_array($database['ssl'])) {
-        fail("Config: 'database.ssl' must be a map.");
-    }
-    $ssl = is_array($database['ssl'] ?? null) ? $database['ssl'] : [];
+    // The framework's own rules (core\config\dto\Database and DatabaseSsl), applied here before anything
+    // connects: otherwise a deploy migrates in plaintext and only then does the application refuse the config.
+    // options is never read here, but the application would refuse it all the same.
+    configMap($database, key: 'options');
+    $ssl = configMap($database, key: 'ssl');
     $port = configString($database, key: 'port', field: 'database.port');
     if ($port !== '' && !ctype_digit($port)) {
         fail("Config: 'database.port' must be a number.");
@@ -144,12 +172,20 @@ function databaseSettings(array $database): array
         'verify' => configBool($ssl, key: 'verify_server_cert', field: 'database.ssl.verify_server_cert', default: true),
     ];
     foreach (['host', 'name', 'user'] as $required) {
-        if ($settings[$required] === '') {
+        if (trim($settings[$required]) === '') {
             fail("The database configuration has no {$required}.");
         }
     }
     if (($settings['cert'] === '') !== ($settings['key'] === '')) {
         fail('Config: database.ssl.cert and database.ssl.key must be set together.');
+    }
+    if (
+        $settings['ca'] === ''
+        && $settings['cert'] === ''
+        && array_any($ssl, static fn(mixed $setting): bool => $setting !== null && $setting !== '')
+    ) {
+        fail("Config: 'database.ssl' holds settings but requests no TLS; set 'ca', or 'cert' and 'key', "
+            . 'or leave it as [] for a connection without TLS.');
     }
 
     return $settings;

@@ -38,13 +38,46 @@ final class Reply
 
             // RFC 5321 4.2: "NNN-" continues a reply; the final line is "NNN text" or a bare "NNN".
             if (in_array($line[3] ?? '', [' ', "\r", "\n"], strict: true)) {
-                break;
+                return $response;
             }
 
             $line = '';
         }
 
-        return $response;
+        if ($response !== '') {
+            throw new RuntimeException('SMTP_INVALID_RESPONSE');
+        }
+
+        return '';
+    }
+
+    /**
+     * The code of a complete reply. RFC 5321 4.2: every line carries it, "NNN-" on all but the last and
+     * "NNN " or a bare "NNN" on the last, so a reply that changes its code half way says nothing certain.
+     */
+    public static function code(string $response): int
+    {
+        if ($response === '') {
+            throw new RuntimeException('SMTP_EMPTY_RESPONSE');
+        }
+
+        $lines = explode("\n", str_replace(["\r\n", "\r"], replace: "\n", subject: rtrim($response, characters: "\r\n")));
+        $last = count($lines) - 1;
+        $code = (int)substr($lines[0], offset: 0, length: 3);
+
+        foreach ($lines as $index => $line) {
+            $match = [];
+
+            if (
+                preg_match('/^(\d{3})(?:([ -]).*)?$/D', $line, $match) !== 1
+                || (int)$match[1] !== $code
+                || (($match[2] ?? '') === '-') !== ($index < $last)
+            ) {
+                throw new RuntimeException('SMTP_INVALID_RESPONSE');
+            }
+        }
+
+        return $code;
     }
 
     /**

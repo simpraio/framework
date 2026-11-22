@@ -5,8 +5,8 @@
 Several security controls are active on every request without any configuration:
 
 - **Segment whitelist** - URL segments allow only `a-z 0-9 -`. Dots, underscores, encoded characters, and traversal sequences are rejected with `404` before any filesystem path is constructed.
-- **Depth limit** - more than 3 URL segments (after an optional language prefix) returns `404`.
-- **Token escaping** - `tokens()` runs every value through `htmlspecialchars` and escapes `{` and `}`, preventing XSS and template injection from user-supplied data.
+- **Convention depth limit** - without a matching alias, more than 3 URL segments (after an optional language prefix) returns `404`. Aliases resolve first and may contain more segments.
+- **Token escaping** - `tokens()` escapes HTML and `{` and `}` markers. Use it for HTML text and quoted ordinary attribute values; validate URL values separately. It is not JavaScript or CSS encoding.
 - **Redirect guard** - `Response::redirect()` only accepts paths starting with `/`. External URLs, protocol-relative URLs, and ASCII control characters or DEL throw `InvalidArgumentException`; tabs are included because browsers remove them while parsing URLs.
 - **Header injection guard** - header names and values containing CR, LF, or NUL throw `InvalidArgumentException` before any header is set.
 - **Error concealment** - in production (`debug: false`), 5xx error pages show a generic message. Stack traces and file paths are only exposed when `debug: true`.
@@ -30,7 +30,7 @@ See [Extension: csrf](12-Extensions-CSRF.md) for configuration, AJAX headers, to
 
 The `security` extension adds HTTP security headers in the response `after()` hook and is **enabled by default**.
 
-See [Extension: security](22-Extensions-Security.md) for exact defaults, config syntax, HSTS behavior, and HTML-only response rules.
+See [Extension: security](22-Extensions-Security.md) for config examples, HSTS behavior, and HTML/XML response rules; shipped defaults live in `config/security.php`.
 
 ## Rate Limiting
 
@@ -89,9 +89,20 @@ The error handler behaviour differs between debug and production mode, controlle
 500 -> "Something went wrong. Please try again later." - no details
 ```
 
-4xx errors always show their standard message regardless of mode (e.g. `404 Not Found` is not a security-sensitive disclosure). 5xx details are suppressed in production.
+In production, 4xx errors show their standard status message and 5xx details are suppressed. Debug
+mode displays the exception's supplied message for 4xx as well as 5xx errors.
 
-`display_errors` is disabled in all modes - errors are never printed to the response by PHP itself. `Kernel::boot()` turns it off, together with call arguments in traces (`zend.exception_ignore_args`), before it loads any config, so a malformed config file, an unknown timezone or an unwritable log directory that stops the boot before the error handler is registered is not printed either, whatever `php.ini` says. The error handler sets both again when it registers. In production, all exceptions are logged to the application log (and to the `error_log` database table if the `error-log` extension is enabled). In the application log, the value of every configured secret - the database and SMTP passwords, OIDC client secrets, anything under a key the log treats as secret - is replaced with `[REDACTED]` in the message and the trace, so an exception carrying a DSN does not write the password; the database table stores the message and trace stripped the same way. See [Log Settings](02-Configuration.md#log-settings).
+`display_errors` is disabled in all modes - errors are never printed to the response by PHP itself. `Kernel::boot()` turns it off, together with call arguments in traces (`zend.exception_ignore_args`), before it loads any config, so a malformed config file, an unknown timezone or an unwritable log directory that stops the boot before the error handler is registered is not printed either, whatever `php.ini` says. The error handler sets both again when it registers.
+
+After registration, unhandled exceptions mapped to 5xx are logged and passed to registered error
+sinks, including the `error_log` database sink when enabled and attached. A 401 or 403 produces an
+access-denial warning instead; other 4xx exceptions are not logged by this handler.
+
+The file log, database sink, and uncaught-exception output on STDERR strip recognized configured
+secret values of at least eight bytes in the supported literal, URL and JSON spellings described in
+[Log Settings](02-Configuration.md#log-settings). Shorter values and unsupported encodings are not
+stripped: do not treat redaction as a guarantee that a log line or cron job's output contains no
+secrets. Keep credentials out of messages yourself.
 
 Deprecations (`E_DEPRECATED`, `E_USER_DEPRECATED`) do not stop the request; they are logged at `warning` level as `Deprecated: <message>` with file and line. Each distinct one - the same file, line and message - is recorded once per request, and at most 100 per request, after which one line says so and further deprecations cost nothing. A deprecated call inside a loop is therefore one log line, not one locked write per iteration. What has been recorded is kept for the life of the PHP process, which under PHP-FPM or mod_php is one request. A CLI script, queue worker or other long-running process records each distinct deprecation once for its whole run, and after 100 distinct ones it records none for the rest of that run; the line saying so still reads "in this request". Only a restart lets such a process record them again.
 
@@ -113,6 +124,9 @@ An empty list (the default) disables the check - acceptable for development, not
 
 The `http-client` extension enforces an egress allowlist (`extensions.http-client.egress`): when enabled, requests may only target allowlisted hosts, and with `block_private_ips` on, an allowlisted host that resolves to a **non-globally-routable** IP is rejected as defense in depth. That is wider than private and reserved: shared address space (`100.64.0.0/10`, carrier-grade NAT) and the benchmarking and documentation ranges are refused too. Special-purpose ranges RFC 6890 marks globally reachable, such as the NAT64 prefix `64:ff9b::/96`, stay allowed - being special-purpose is not the test, being unroutable is. Reachability comes from a static classification of the IANA registries, matched longest-prefix-first - IPv6 denied by default, with `2000::/3` and the explicitly globally-reachable special-purpose carve-outs allowed; IPv4 allowed outside its special-purpose carve-outs - rather than from PHP's `FILTER_FLAG_GLOBAL_RANGE` - which accepts several non-global ranges (multicast, `64:ff9b:1::/48`, `3fff::/20`, `5f00::/16`). The flag applies only where the table says nothing, and can then withhold an address but never permit one. IPv4-mapped addresses (`::ffff:0:0/96`) are refused as a range. A host resolving to nothing at all is rejected too, since there is then no address to check. The validated addresses are pinned onto the connection (`CURLOPT_RESOLVE`) so the name is not resolved a second time and dialled at an address that was never checked. Redirect targets are checked against the same policy before they are followed. The outbound proxy is operator-config only and is never accepted as a per-request option (a request-supplied proxy would bypass the allowlist). It is also always sent to cURL, empty when unset, so that a `http_proxy`/`HTTPS_PROXY`/`ALL_PROXY` variable in the environment cannot route outbound traffic unannounced; when a proxy is configured, `CURLOPT_NOPROXY` is sent empty so `NO_PROXY` cannot exempt a host from it and connect directly. Address pinning only covers direct connections - a proxy resolves the destination itself - so a configured proxy is refused at boot while the client is enabled and the egress guard is enabled with `block_private_ips`. A disabled guard enforces no addresses, and a disabled client makes no requests at all, so a proxy is accepted in either case. See [Extension: HTTP Client](16-Extensions-Httpclient.md).
 
+The NAT64 prefix is not a blanket exception: an address under `64:ff9b::/96` is allowed only when
+its embedded IPv4 address is globally routable too.
+
 The client follows up to five HTTP redirects manually instead of using cURL's automatic redirect handling, so each `Location` target is rechecked before the next request is made. When a redirect changes origin, the next hop keeps only the caller's `Accept`, `Accept-Encoding`, `Accept-Language`, `User-Agent`, `Cache-Control` and `Pragma` headers - an allowlist, because a list of credential names always misses one - drops the cookie jar, and turns a request that carried a body into a bodiless `GET`, even on a `307` or `308`; a bodiless request keeps its method.
 
 ## Production Checklist
@@ -126,7 +140,7 @@ The client follows up to five HTTP redirects manually instead of using cURL's au
 - Keep `session.cache_limiter: nocache` unless every session-backed response receives an application-owned, reviewed `Cache-Control` policy.
 - Enable the `csrf` extension and add `{_csrf}` to every unsafe form.
 - Enable the `security` extension (on by default) and review the CSP policy for your specific assets and third-party origins.
-- Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, auth access, auth group, and error-log purge caches. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.
+- Enable APCu when using `ratelimit`. APCu is also strongly recommended for shared template, asset-version, route-alias, SEO, translation, registry, and error-log purge caches. Auth access rules and groups are cached only within the request, independently of APCu. Without APCu, general cache entries live only for the current request, so later requests recompute them and repeat any backing database or filesystem lookup. Auth login throttling still works without APCu by using locked local files, but those counters are host-local.
 - Use `tokens()` for all user-facing values; reserve `rawTokens()` for HTML you produced.
 - Validate and whitelist redirect destinations in your controllers before passing them to `Response::redirect()`.
 - Clear the bundle cache (`rm -f cache/*.php`) on every deploy after a config or framework change - stale bundles silently serve old config and can re-enable disabled extensions (see [Deployment: Updating Code or Configuration](27-Deployment.md#updating-code-or-configuration)).

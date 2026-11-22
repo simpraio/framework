@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 namespace core;
 
-use core\config\Config;
 use core\error\Deprecations;
 use core\error\Page;
 use core\error\SecurityHeaders;
 use core\http\HttpException;
 use core\http\Url;
+use core\log\NativeLog;
 use core\log\Secrets;
 use core\log\Writer;
 use ErrorException;
-use RuntimeException;
 use Throwable;
 
 final class ErrorHandler
@@ -197,22 +196,9 @@ final class ErrorHandler
         }
     }
 
-    /**
-     * To PHP's own error log, stripped of configured secret values like a line of the log file. With
-     * no configuration loaded there is nothing to strip, and the line is reported as it is. A secret scan
-     * that stopped at its limits cannot strip what it missed, so the line is left out, as the log file
-     * leaves out caller text.
-     */
     private static function report(string $line): void
     {
-        try {
-            $stripped = (new Secrets(Config::secrets()))->strip($line);
-        } catch (RuntimeException) {
-            $stripped = 'ErrorHandler: ' . Secrets::UNCOLLECTED;
-        } catch (Throwable) {
-            $stripped = $line;
-        }
-        error_log($stripped);
+        error_log(NativeLog::line($line) ?? 'ErrorHandler: ' . Secrets::UNCOLLECTED);
     }
 
     private static function page(): Page

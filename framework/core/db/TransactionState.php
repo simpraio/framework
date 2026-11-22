@@ -11,9 +11,7 @@ use RuntimeException;
 final class TransactionState
 {
     /**
-     * MySQL errors after which the connection is gone: lost (2006, 2013), killed (1927), or closed
-     * by the server for idling past wait_timeout (4031, which MySQL 8.0.24+ sends where older
-     * servers and MariaDB leave the client to report 2006 or 2013).
+     * Lost connection (2006/2013), killed session (1927), or server-reported idle timeout (4031).
      */
     private const array CONNECTION_LOST = [1927, 2006, 2013, 4031];
 
@@ -45,16 +43,20 @@ final class TransactionState
         }
     }
 
+    /**
+     * Outside a transaction there is nothing to abort, and the flag would refuse every later call:
+     * only the outermost callback unwinding clears it.
+     */
     public function abort(): void
     {
-        $this->failed = true;
+        if ($this->depth > 0) {
+            $this->failed = true;
+        }
     }
 
     /**
-     * Aborts the open transaction when a MySQL statement error ended it, and says whether it did.
-     * The error reply carries no transaction status, so PDO still reports the transaction open,
-     * and a callback that swallowed the error would run its remaining statements in autocommit.
-     * Any other error undoes only its own statement and leaves the transaction usable.
+     * Error replies carry no transaction status, so PDO can still report a server-aborted transaction open.
+     * Refuse further work even if the callback catches the error, rather than continue in autocommit.
      */
     public function abortOn(PDOException $e): bool
     {

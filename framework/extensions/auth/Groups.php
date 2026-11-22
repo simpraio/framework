@@ -6,7 +6,7 @@ namespace extensions\auth;
 
 use core\db\Db;
 
-/** Groups from `auth_group`, read once per request so a status change applies at once. */
+/** Group status is cached only for this request, so later requests observe revocations. */
 final class Groups
 {
     /** @var array<int, array{name: string, active: bool}>|null group_id => name and status */

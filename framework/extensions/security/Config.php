@@ -30,14 +30,12 @@ final readonly class Config
     }
 
     /**
-     * Refused as a config error that names the key, not left for Response::header() to reject without saying where it came from.
-     *
      * @param array<string, mixed> $raw
      * @return array<string, string>
      */
     private static function headers(array $raw): array
     {
-        $headers = array_filter(Map::stringMap($raw, 'headers'), static fn(string $value): bool => $value !== '');
+        $headers = array_filter(Map::stringMap($raw, 'headers', 'extensions.security.headers'), static fn(string $value): bool => $value !== '');
 
         foreach ($headers as $name => $value) {
             if (!HeaderField::isName($name)) {

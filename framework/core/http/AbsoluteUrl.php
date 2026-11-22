@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace core\http;
 
-/**
- * An absolute http(s) URL that has passed Url::parse(). Obtain one through Url::parse(), the
- * single entry point for URL handling; this class holds what a parsed URL can tell you.
- */
+/** Obtain one through Url::parse(), the single entry point for URL handling. */
 final readonly class AbsoluteUrl
 {
     private const array DEFAULT_PORTS = ['http' => 80, 'https' => 443];
@@ -24,10 +21,9 @@ final readonly class AbsoluteUrl
     }
 
     /**
-     * Refused outright rather than interpreted: whitespace, control bytes, backslashes and a
-     * percent-encoded host, because two URL parsers can disagree about each of them - and the
-     * one that checks a URL is not the one that connects to it. Credentials are refused too:
-     * a URL is logged, kept in history and forwarded, and user:secret@ would travel with it.
+     * Refuse whitespace, control bytes, backslashes and a percent-encoded host: the parser that checks a URL is not the one that connects to it.
+     * Refuse a non-ASCII host too: cURL connects to its punycode form, a name no allowlist or pin here was checked against.
+     * Refuse embedded credentials so URLs remain safe to forward and log.
      */
     public static function from(string $url): ?self
     {
@@ -42,7 +38,7 @@ final readonly class AbsoluteUrl
 
         $scheme = strtolower($parts['scheme'] ?? '');
         $host = strtolower($parts['host'] ?? '');
-        if (!array_key_exists($scheme, self::DEFAULT_PORTS) || $host === '' || str_contains($host, '%')) {
+        if (!array_key_exists($scheme, self::DEFAULT_PORTS) || $host === '' || preg_match('/[%\x80-\xFF]/', $host) === 1) {
             return null;
         }
 

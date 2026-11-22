@@ -69,7 +69,7 @@ final readonly class Config
                 'extensions.http-client.proxy is set while extensions.http-client.egress.'
                 . 'block_private_ips is enabled. The proxy resolves the destination hostname itself, '
                 . 'so the addresses validated here are not the ones connected to and the private-IP '
-                . 'check cannot be enforced. Set egress.block_private_ips=false to state that the '
+                . 'check cannot be enforced. Set extensions.http-client.egress.block_private_ips to false to state that the '
                 . 'trusted proxy owns that policy, or remove the proxy to keep enforcement here.'
             );
         }

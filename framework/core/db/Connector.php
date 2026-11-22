@@ -9,9 +9,6 @@ use PDO;
 use Pdo\Mysql;
 use RuntimeException;
 
-/**
- * Opens the PDO connection database.* describes.
- */
 final readonly class Connector
 {
     public function __construct(
@@ -25,9 +22,7 @@ final readonly class Connector
             return $this->connect();
         }
 
-        // mysqlnd has no attribute for its read timeout: it copies this ini into each connection as
-        // the connection is created, and the ini's default of a day would hold the worker that long
-        // on a server that stopped answering.
+        // mysqlnd copies this ini at connection creation; PDO has no equivalent read-timeout attribute.
         $previous = ini_set('mysqlnd.net_read_timeout', (string)$this->config->readTimeout);
         try {
             return $this->connect();
@@ -49,7 +44,7 @@ final readonly class Connector
     }
 
     /**
-     * TLS attributes use integer keys, which raw database.options does not preserve.
+     * TLS attributes use integer keys, which database.options refuses.
      *
      * @return array<int, mixed>
      */

@@ -10,10 +10,14 @@ use SensitiveParameter;
 
 final class Connection
 {
+    /** The floor of both ways into TLS: the ssl:// handshake takes it from the context, STARTTLS as its argument. */
+    private const int TLS_CRYPTO_METHOD = STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT;
+
     private const array TLS_CONTEXT = [
         'verify_peer' => true,
         'verify_peer_name' => true,
         'allow_self_signed' => false,
+        'crypto_method' => self::TLS_CRYPTO_METHOD,
     ];
 
     private mixed $socket;
@@ -32,9 +36,7 @@ final class Connection
         // STARTTLS starts on plain TCP, so certificate verification needs an explicit peer name.
         $context = stream_context_create(['ssl' => [...self::TLS_CONTEXT, 'peer_name' => $config->host]]);
         $warning = null;
-        // The warning is kept, not raised, so a failure surfaces as SMTP_CONNECT_FAILED under the
-        // framework's error handler too. An implicit TLS (ssl) failure leaves $error empty and
-        // explains itself only in that warning.
+        // Implicit TLS failures may leave $error empty; retain the warning as a diagnostic, not an ErrorException.
         $socket = self::keepingFirstWarning($warning, static function () use ($config, $context, &$errno, &$error): mixed {
             return stream_socket_client(
                 address: $config->address(),
@@ -57,8 +59,7 @@ final class Connection
     }
 
     /**
-     * Commands and credentials alike, so the data stays out of traces: a failed write is reported
-     * by fwrite's return value, never by a notice that would carry it.
+     * Suppress write warnings and trace arguments: SMTP data can contain credentials.
      */
     public function write(#[SensitiveParameter] string $data): void
     {
@@ -108,7 +109,7 @@ final class Connection
         $upgraded = self::keepingFirstWarning($reason, static fn(): bool|int => stream_socket_enable_crypto(
             $socket,
             enable: true,
-            crypto_method: STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT,
+            crypto_method: self::TLS_CRYPTO_METHOD,
         ));
 
         if ($upgraded !== true) {
@@ -151,8 +152,7 @@ final class Connection
         if (is_resource($this->socket)) {
             $socket = $this->socket;
             $this->socket = null;
-            // The connection is discarded either way, and a notice here must not fail a send the
-            // server has already accepted.
+            // A close warning must not fail delivery already accepted by the server.
             Silently::call(static fn(): bool => fclose($socket));
         }
     }

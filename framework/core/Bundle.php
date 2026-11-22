@@ -80,7 +80,6 @@ final class Bundle
             limit: 1,
         ) ?? $src;
 
-        // Split at the first namespace statement: what precedes it, the name, and the body after it.
         $parts = preg_split('/^\s*namespace\s+([^;]+);\s*/m', $src, limit: 2, flags: PREG_SPLIT_DELIM_CAPTURE);
         if ($parts === false || count($parts) !== 3) {
             return "namespace {\n" . trim($src) . "\n}";
@@ -93,13 +92,10 @@ final class Bundle
     private static function write(string $outFile, string $body): void
     {
         Directory::ensure(dirname($outFile), 0o700, 'Bundle: cannot create bundle directory');
-        // Random, not the process id: processes in different PID namespaces can share a bundle directory,
-        // and the first write below truncates without a lock.
+        // PID namespaces may share this directory, so a process ID is not a unique temporary name.
         $tmp = $outFile . '.tmp.' . bin2hex(random_bytes(8));
 
-        // A bundle is PHP the framework executes, and the config bundle holds the committed config/*.php,
-        // where a project may still have put a secret: the file is owner-only before anything is written
-        // to it, whatever the process umask.
+        // Bundles are executable and may contain config secrets: make them owner-only before writing.
         if (Silently::call(static fn(): int|false => file_put_contents($tmp, data: '')) === false
             || !Silently::call(static fn(): bool => chmod($tmp, permissions: 0o600))
             || Silently::call(static fn(): int|false => file_put_contents($tmp, $body, LOCK_EX)) === false

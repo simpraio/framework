@@ -13,7 +13,9 @@ return [
             // Traces may contain sensitive data; disable storage where required.
             'store_trace'    => true,
 
-            // Query keys redacted besides log.redact_keys and its built-in ones, matched the same way; paths, messages and traces are not scrubbed.
+            // Extra query keys to redact, besides log.redact_keys and built-ins.
+            // Secret values under log.redact_keys and the built-in names are stripped from messages and
+            // traces; a stored URL gets query-name redaction only.
             'redact_keys'    => [],
         ],
     ],

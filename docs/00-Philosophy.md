@@ -19,7 +19,7 @@ That means:
 - Convention routing instead of attributes.
 - Static facades for ergonomics, backed by simple service instances.
 - Optional extensions instead of a mandatory feature stack.
-- No reflection or auto-wiring in the runtime path.
+- No reflection-based wiring or auto-wiring. Dispatch uses `ReflectionClass::isAbstract()` only to reject abstract controllers.
 
 This is not because dependency injection, interfaces, or richer architecture are bad. They are useful tools. They are just not free. In a small framework, every abstraction has to earn its place.
 

@@ -8,6 +8,8 @@ use core\ErrorHandler;
 use core\View;
 use core\config\Config;
 use core\http\HttpException;
+use core\log\NativeLog;
+use core\log\Secrets;
 use core\tools\Format;
 use RuntimeException;
 use Throwable;
@@ -19,6 +21,10 @@ final class Page
         private readonly ?View $view,
     ) {}
 
+    /**
+     * In debug the page shows the message, file and trace as they are, configured secrets included; only
+     * text(), for STDERR and error_log, strips them. Intentional for development: project.debug stays off in production.
+     */
     public function html(Throwable $e, int $status): string
     {
         try {
@@ -30,11 +36,14 @@ final class Page
 
     public function text(Throwable $e): string
     {
-        if (!$this->debug) {
-            return 'Error: ' . $e->getMessage();
-        }
+        $lines = $this->debug
+            ? [ErrorHandler::describe($e), ...explode("\n", $e->getTraceAsString())]
+            : ['Error: ' . $e->getMessage()];
 
-        return ErrorHandler::describe($e) . "\n" . $e->getTraceAsString();
+        // One line per frame is kept; the message, which may hold line breaks of its own, is one unit.
+        $safe = NativeLog::lines($lines);
+
+        return $safe === null ? Secrets::UNCOLLECTED : implode("\n", $safe);
     }
 
     private function template(Throwable $e, int $status): string

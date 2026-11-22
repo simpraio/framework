@@ -6,10 +6,17 @@ namespace core\config;
 
 use core\config\loader\Env;
 use core\config\loader\Files;
+use ErrorException;
 use RuntimeException;
 
 final readonly class Compiler
 {
+    /**
+     * Flat maps merged with their integer keys kept: a PDO constant set there never reaches the connection, and
+     * Database::settings() refuses it only if it is still there to see.
+     */
+    private const array KEEP_INTEGER_KEYS = ['database.options', 'database.ssl'];
+
     public function __construct(
         private Files $files,
         private Env $env,
@@ -44,9 +51,8 @@ final readonly class Compiler
     }
 
     /**
-     * Lists and scalars replace, so a later layer can shrink or clear a list with []. A map an earlier
-     * layer set is only ever changed key by key: [] - PHP's empty list and empty map alike - leaves it
-     * alone, so a placeholder cannot wipe committed hardening, and a list or scalar in its place is refused.
+     * Replace lists and scalars; merge maps. An empty override preserves an existing map so a
+     * placeholder cannot erase hardening, but clears an existing list.
      *
      * @param array<string, mixed> $base
      * @param array<string, mixed> $override
@@ -75,7 +81,9 @@ final readonly class Compiler
                     is_array($value) ? 'a list' : get_debug_type($value),
                 ));
             }
-            $base[$key] = self::merge(Map::stringKeyed($current), Map::stringKeyed($value), $path . $key . '.');
+            $base[$key] = in_array($path . $key, self::KEEP_INTEGER_KEYS, strict: true)
+                ? array_replace($current, $value)
+                : self::merge(Map::stringKeyed($current), Map::stringKeyed($value), $path . $key . '.');
         }
 
         return $base;
@@ -90,15 +98,37 @@ final readonly class Compiler
     }
 
     /**
-     * A layer that is not a map of sections - a forgotten `return`, a list - is refused: dropped or merged
-     * under a numeric key, every setting in it would silently fall back to its default.
+     * Config::init() runs before ErrorHandler::register(), so a warning in a layer would be printed or
+     * logged and the boot would go on with null for whatever it was computing. The message names the file
+     * and never PHP's text, which can quote a value. Every level but the deprecations is raised while the layer
+     * runs, so a php.ini that masks warnings cannot switch the check off, while a deprecation it hid is not
+     * passed on to PHP's own display and log; `@` still silences its own expression.
      *
      * @return array<string, mixed>
      */
     private static function layer(string $path): array
     {
-        /** @var mixed $data */
-        $data = require $path;
+        $reporting = error_reporting();
+        error_reporting($reporting | (E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED));
+        set_error_handler(static function (int $severity, string $message, string $file, int $line) use ($path): bool {
+            if ((error_reporting() & $severity) === 0 || ($severity & (E_DEPRECATED | E_USER_DEPRECATED)) !== 0) {
+                return false;
+            }
+
+            throw new ErrorException(sprintf(
+                'Config: %s raised a PHP warning at %s:%d; a setting computed from it would silently be null or missing.',
+                basename($path),
+                basename($file),
+                $line,
+            ), 0, $severity, $file, $line);
+        });
+        try {
+            /** @var mixed $data */
+            $data = require $path;
+        } finally {
+            restore_error_handler();
+            error_reporting($reporting);
+        }
 
         if (!is_array($data) || array_any(array_keys($data), static fn(int|string $key): bool => !is_string($key))) {
             throw new RuntimeException(sprintf(

@@ -63,9 +63,7 @@ final readonly class Config
             defaultPolicy: in_array($policy, ['allow', 'deny'], strict: true) ? $policy : 'deny',
             guestRoute: self::redirectPath($guest),
             deniedRedirect: self::redirectPath($denied),
-            // Empty is the opt-out, and a meaningful one: the page a guest asked for ends up in
-            // the sign-in URL, so it reaches access logs and browser history. A project whose URLs
-            // carry anything sensitive in a query string turns this off rather than forking.
+            // Empty disables return targets, which otherwise expose the original query in the sign-in URL.
             returnParam: Cast::string($raw['return_param'] ?? null, 'extensions.auth.return_param', 'return'),
         );
     }

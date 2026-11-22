@@ -6,12 +6,14 @@ namespace extensions\oidc_login\microsoft;
 
 use core\config\Cast;
 use core\config\RedactsSecrets;
+use extensions\oidc_login\LoginException;
 use extensions\oidc_login\microsoft\groups\Policy;
 use extensions\oidc_login\oidc\Registration as OidcRegistration;
 use extensions\oidc_login\Provider;
 use InvalidArgumentException;
 use JsonSerializable;
 use SensitiveParameter;
+use UnexpectedValueException;
 
 final readonly class Registration implements OidcRegistration, JsonSerializable
 {
@@ -19,7 +21,9 @@ final readonly class Registration implements OidcRegistration, JsonSerializable
 
     private const string AUTHORITY = 'https://login.microsoftonline.com';
 
-    /** @param list<string> $scopes */
+    /**
+     * @param list<string> $scopes
+     */
     public function __construct(
         public string $tenant,
         public string $clientId,
@@ -28,6 +32,9 @@ final readonly class Registration implements OidcRegistration, JsonSerializable
         public string $redirectUri,
         public array $scopes,
         public Policy $groups,
+        public string $clientCertificate = '',
+        public string $clientPrivateKey = '',
+        public ClientCredential $clientCredential = ClientCredential::Secret,
     ) {
     }
 
@@ -42,21 +49,89 @@ final readonly class Registration implements OidcRegistration, JsonSerializable
     {
         $clientId = Cast::trimmedString($raw['client_id'] ?? null, 'extensions.oidc-login.microsoft.client_id');
         $clientSecret = Cast::trimmedString($raw['client_secret'] ?? null, 'extensions.oidc-login.microsoft.client_secret');
+        $certificate = Cast::trimmedString($raw['client_certificate'] ?? null, 'extensions.oidc-login.microsoft.client_certificate');
+        $privateKey = Cast::trimmedString($raw['client_private_key'] ?? null, 'extensions.oidc-login.microsoft.client_private_key');
+        $credential = ClientCredential::fromConfig($raw['client_credential'] ?? null, $enabled);
+        $tenant = Rules::tenant($raw['tenant'] ?? null, $enabled);
 
-        if ($enabled && ($clientId === '' || $clientSecret === '')) {
+        if ($enabled && $clientId === '') {
+            throw new InvalidArgumentException('extensions.oidc-login.microsoft requires client_id when enabled.');
+        }
+        if ($enabled && $credential !== ClientCredential::Certificate && $clientSecret === '') {
             throw new InvalidArgumentException(
-                'extensions.oidc-login.microsoft requires client_id and client_secret when enabled.'
+                "extensions.oidc-login.microsoft.client_credential is 'secret' (the default) but client_secret is empty;"
+                . " set client_credential to 'certificate' to use client_certificate and client_private_key."
             );
+        }
+        if ($enabled && $credential === ClientCredential::Certificate) {
+            self::requireCertificate($certificate, $privateKey, $tenant);
         }
 
         return new self(
-            tenant: Rules::tenant($raw['tenant'] ?? null, $enabled),
+            tenant: $tenant,
             clientId: $clientId,
             clientSecret: $clientSecret,
             redirectUri: Provider::redirectUri($raw['redirect_uri'] ?? null, $enabled, 'microsoft'),
             scopes: Rules::scopes($raw['scopes'] ?? null),
             groups: Policy::fromArray($raw),
+            clientCertificate: $certificate,
+            clientPrivateKey: $privateKey,
+            clientCredential: $credential,
         );
+    }
+
+    /**
+     * Read certificate files at sign-in, not boot: an unusable key must not take down other pages.
+     * Refuse before sending anything, without falling back to a secret.
+     *
+     * @return array<string, string>
+     */
+    public function clientAuthentication(Provider $config): array
+    {
+        if ($this->clientCredential !== ClientCredential::Certificate) {
+            return ['client_secret' => $this->clientSecret];
+        }
+        try {
+            $assertion = ClientAssertion::sign($this->clientId, $this->tokenUrl(), $this->clientCertificate, $this->clientPrivateKey);
+        } catch (UnexpectedValueException $e) {
+            throw new LoginException($config->reason('CLIENT_CREDENTIAL_UNAVAILABLE'), $e->getMessage());
+        }
+        if ($assertion === null) {
+            throw new LoginException($config->reason('CLIENT_CREDENTIAL_UNAVAILABLE'), 'client certificate or private key unusable');
+        }
+
+        return ['client_assertion_type' => ClientAssertion::TYPE, 'client_assertion' => $assertion];
+    }
+
+    private static function requireCertificate(string $certificate, string $privateKey, string $tenant): void
+    {
+        $requirement = ClientAssertion::missingRequirement();
+        if ($requirement !== null) {
+            throw new InvalidArgumentException(
+                "extensions.oidc-login.microsoft.client_credential 'certificate' requires {$requirement} or later for PS256 signing."
+            );
+        }
+        if (!self::isAbsolutePath($certificate) || !self::isAbsolutePath($privateKey)) {
+            throw new InvalidArgumentException(
+                "extensions.oidc-login.microsoft.client_credential is 'certificate': client_certificate and"
+                . ' client_private_key must both be absolute file paths.'
+            );
+        }
+        // The assertion's audience is the tenant's own token endpoint; Microsoft documents it only
+        // for a directory ID, never for the common/organizations/consumers aliases.
+        if (!Guid::isValid($tenant)) {
+            throw new InvalidArgumentException(
+                "extensions.oidc-login.microsoft.client_credential 'certificate' requires tenant to be a directory GUID."
+            );
+        }
+    }
+
+    /** A Unix absolute path, or a Windows drive or UNC path; never relative to the working directory. */
+    private static function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/')
+            || preg_match('#^[A-Za-z]:[\\\\/]#', $path) === 1
+            || str_starts_with($path, '\\\\');
     }
 
     public function authorizeUrl(): string

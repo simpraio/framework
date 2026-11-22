@@ -23,9 +23,15 @@ Use these methods when you need translations in PHP code (controllers, services)
 
 | Call | Returns | Description |
 | --- | --- | --- |
-| `Translation::text($pathId, $id, $language, $values)` | `string` | Returns the translation string HTML-escaped, braces included, so it can be put into a page with `rawTokens()` and form no marker there. Use for plain-text output in PHP code. `$values` is an optional substitution map applied before escaping. |
+| `Translation::text($pathId, $id, $language, $values)` | `string` | Returns the translation string HTML-escaped, braces included, so it can be put into a page with `rawTokens()` and form no marker there. It is HTML, not plain text: a mail subject or a text part built from it carries `Tom &amp; Jerry` for `Tom & Jerry`. `$values` is an optional substitution map applied before escaping. |
 | `Translation::html($pathId, $id, $language, $values)` | `string` | Returns the translation string with `$values` HTML-escaped, braces included, but the surrounding text unescaped - for translations that contain HTML markup. |
 | `Translation::clear($pathId, $language)` | `void` | Clears the APCu cache for a given path and language. Omit `$language` to clear all languages for that path. |
+
+Neither method returns plain text, and the extension has no plain-text accessor. For a subject or a text part, keep the stored text plain, read it with `Translation::html()` without `$values`, which returns it as stored, and fill its markers with `Format::template()`, which substitutes into the literal text it is given and escapes nothing (see [Formatting Helpers](05-Templates.md#formatting-helpers)):
+
+```php
+$subject = Format::template(Translation::html('mail/order', 'SUBJECT', $language), ['name' => $customer]);
+```
 
 In templates, tokens are referenced directly without calling PHP - the contributor injects them automatically:
 
@@ -50,7 +56,7 @@ CREATE TABLE `translation`
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 ```
 
-`path_id` is the route identifier (`module/controller`) or the special value `layout` for tokens shared across all pages. `id` is the translation key - stored in any case but matched case-insensitively (the contributor uppercases it before injecting). The token name in the template is the uppercased `id`.
+`path_id` is the route identifier (`module/controller`) or the special value `layout` for tokens shared across all pages. `id` is the translation key - stored in any case but matched case-insensitively (the contributor uppercases it before injecting). The token name in the template is the uppercased `id`. An id that is a number, such as `404` or `2024`, is a token like any other: `{404}` is filled with its text.
 
 ## Example
 

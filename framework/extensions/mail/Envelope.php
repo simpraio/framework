@@ -20,7 +20,7 @@ final readonly class Envelope
 
     /**
      * @param list<string> $recipients
-     * @param array<string, string> $headers
+     * @param array<array-key, string> $headers
      * @param string|null $fromEmail explicit SMTP envelope sender. When omitted, a valid final
      *                              address in the From header is used.
      */
@@ -32,21 +32,23 @@ final readonly class Envelope
         ?string $fromEmail = null,
     ) {
         $normalized = Recipients::normalize($recipients);
-        $sender = $fromEmail !== null ? trim($fromEmail) : self::senderFromHeader($headers);
+        HeaderRules::assertRenderable('Subject', $subject);
 
+        $checkedHeaders = [];
+        foreach ($headers as $name => $value) {
+            $name = (string)$name;
+            HeaderRules::assertName($name);
+            HeaderRules::assertRenderable($name, $value);
+            $checkedHeaders[$name] = $value;
+        }
+
+        $sender = $fromEmail !== null ? trim($fromEmail) : self::senderFromHeader($checkedHeaders);
         if ($sender !== null && !Recipients::isAddress($sender)) {
             throw new InvalidArgumentException('INVALID_ENVELOPE_SENDER');
         }
 
-        HeaderRules::assertRenderable('Subject', $subject);
-
-        foreach ($headers as $name => $value) {
-            HeaderRules::assertName($name);
-            HeaderRules::assertRenderable($name, $value);
-        }
-
         $this->recipients = $normalized;
-        $this->headers = $headers;
+        $this->headers = $checkedHeaders;
         $this->fromEmail = $sender;
         $this->recipientsLine = Recipients::fold($normalized);
     }

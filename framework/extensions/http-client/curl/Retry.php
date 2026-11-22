@@ -5,15 +5,12 @@ declare(strict_types=1);
 namespace extensions\http_client\curl;
 
 /**
- * Whether a failed attempt may be sent again.
- *
- * Only an ambiguous transport failure qualifies - one where the request may or may not
- * have reached the server - and only for a request that is safe to arrive twice.
+ * Retry selected transport failures only when duplicate arrival is safe; never retry an HTTP verdict.
  */
 final class Retry
 {
-    /** Failures that leave it unknown whether the server acted on the request. */
-    private const array AMBIGUOUS = [
+    /** Transient failures worth another attempt. Some can follow a request that was sent, so only a safe one is repeated. */
+    private const array TRANSIENT = [
         CURLE_OPERATION_TIMEDOUT,
         CURLE_COULDNT_CONNECT,
         CURLE_COULDNT_RESOLVE_HOST,
@@ -27,15 +24,12 @@ final class Retry
 
     public static function permitted(int $error, RequestOptions $options): bool
     {
-        // A body disqualifies a request whatever its verb says. The verb is what this
-        // client meant; the body is what the server was handed, and a server is free to
-        // treat a GET carrying one as a write. An ambiguous failure cannot say whether
-        // it already did.
+        // A server may treat even GET with a body as a write; its verb alone cannot make retries safe.
         if ($options->hasBody()) {
             return false;
         }
 
         return in_array($options->method, self::SAFE_METHODS, strict: true)
-            && in_array($error, self::AMBIGUOUS, strict: true);
+            && in_array($error, self::TRANSIENT, strict: true);
     }
 }
